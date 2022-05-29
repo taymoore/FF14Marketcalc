@@ -1,0 +1,5 @@
+/.pytest_cache
+/.venv
+/.vscode
+/classjob_doh.json
+/__pycache__
