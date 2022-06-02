@@ -45,6 +45,7 @@ class ClassJobInfo(BaseModel):
 class Item(BaseModel):
     LevelItem: int
     ID: int
+    Name: str
 
 
 class RecipeLevelTable(BaseModel):
@@ -65,6 +66,26 @@ class Recipe(BaseModel):
     AmountIngredient7: int
     AmountIngredient8: int
     AmountIngredient9: int
+    ItemIngredient0: Item
+    ItemIngredient1: Optional[Item]
+    ItemIngredient2: Optional[Item]
+    ItemIngredient3: Optional[Item]
+    ItemIngredient4: Optional[Item]
+    ItemIngredient5: Optional[Item]
+    ItemIngredient6: Optional[Item]
+    ItemIngredient7: Optional[Item]
+    ItemIngredient8: Optional[Item]
+    ItemIngredient9: Optional[Item]
+    ItemIngredientRecipe0: Optional[List["Recipe"]]
+    ItemIngredientRecipe1: Optional[List["Recipe"]]
+    ItemIngredientRecipe2: Optional[List["Recipe"]]
+    ItemIngredientRecipe3: Optional[List["Recipe"]]
+    ItemIngredientRecipe4: Optional[List["Recipe"]]
+    ItemIngredientRecipe5: Optional[List["Recipe"]]
+    ItemIngredientRecipe6: Optional[List["Recipe"]]
+    ItemIngredientRecipe7: Optional[List["Recipe"]]
+    ItemIngredientRecipe8: Optional[List["Recipe"]]
+    ItemIngredientRecipe9: Optional[List["Recipe"]]
     AmountResult: int
     ItemResult: Item
 

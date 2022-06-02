@@ -19,7 +19,7 @@ class Listing(BaseModel):
 
 class Listings(BaseModel):
     itemID: int
-    worldID: int
+    worldID: Optional[int]
     lastUploadTime: int
     listings: List[Listing]
     currentAveragePrice: float
@@ -31,10 +31,10 @@ class Listings(BaseModel):
     averagePrice: float
     averagePriceNQ: float
     averagePriceHQ: float
-    minPrice: float
-    minPriceNQ: float
-    minPriceHQ: float
-    maxPrice: float
-    maxPriceNQ: float
-    maxPriceHQ: float
-    worldName: str
+    minPrice: int
+    minPriceNQ: int
+    minPriceHQ: int
+    maxPrice: int
+    maxPriceNQ: int
+    maxPriceHQ: int
+    worldName: Optional[str]

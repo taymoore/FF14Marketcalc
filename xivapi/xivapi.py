@@ -1,4 +1,5 @@
 from functools import cache, partial
+import logging
 from typing import (
     Any,
     Callable,
@@ -24,72 +25,12 @@ from xivapi.models import (
     Recipe,
     RecipeCollection,
 )
+from cache import persist_to_file
 
+_logger = logging.getLogger(__name__)
 
 GET_CONTENT_RATE = 0.05
 get_content_time = time.time() - GET_CONTENT_RATE
-
-
-def persist_to_file(file_name: str, timeout_s: float, return_type: BaseCollectionModel):
-
-    try:
-        cache: Dict[Any, Tuple[BaseModel, float]] = {
-            param: (
-                return_type.parse_raw(value[0]),
-                value[1],
-            )
-            for param, value in json.load(open(f".data/{file_name}", "r")).items()
-        }
-    except (IOError, ValueError):
-        print("Error loading cache")
-        cache = {}
-
-    def save_to_disk(
-        cache: Dict[Any, Tuple[Any, float]], file_name: str, return_type: BaseModel
-    ):
-        new_cache: Dict[Any, Tuple[str, float]] = {
-            param: (
-                value[0].json()
-                if isinstance(value[0], BaseModel)
-                else return_type.parse_obj(value[0]).json(),
-                value[1],
-            )
-            for param, value in cache.items()
-        }
-        json.dump(new_cache, open(f".data/{file_name}", "w"))
-
-    atexit.register(partial(save_to_disk, cache, file_name, return_type))
-
-    def decorator(func):
-        def new_func(*args, **kwargs):
-            if args is None:
-                args = []
-            else:
-                args = list(args)
-            if kwargs is not None:
-                for kwarg_value in kwargs.values():
-                    args.append(kwarg_value)
-
-            if len(args) == 0:
-                if len(cache) > 0:
-                    print(f"Age of Cache: {time.time() - cache['null'][1]}s")
-                if len(cache) == 0 or time.time() - cache["null"][1] > timeout_s:
-                    cache["null"] = (func(), time.time())
-                args = "null"
-            else:
-                if str(args) in cache:
-                    print(f"Age of Cache: {time.time() - cache[str(args)][1]}s")
-                if (
-                    str(args) not in cache
-                    or time.time() - cache[str(args)][1] > timeout_s
-                ):
-                    cache[str(args)] = (func(*args), time.time())
-
-            return cache[str(args)][0]
-
-        return new_func
-
-    return decorator
 
 
 R = TypeVar("R", bound=BaseModel)
@@ -99,7 +40,7 @@ R = TypeVar("R", bound=BaseModel)
 # TODO: Give this a return type
 @cache
 def get_content(content_name: str, t: R):
-    print(f"getting {content_name}")
+    _logger.log(logging.INFO, f"getting {content_name}")
     if content_name[0] == "/":
         content_name = content_name[1:]
     url = f"https://xivapi.com/{content_name}"
