@@ -6,10 +6,17 @@ from pydantic import BaseModel
 # Assumes each player has at least one choice
 def class_randomizer(
     players_dict: Dict[str, List[Tuple[str, str]]] = {
-        "dan": [("Blm", "dps"), ("Whm", "healer"), ("Drk", "tank")],
-        "kattie": [("War", "tank"), ("Nnj", "dps"), ("Drk", "tank")],
-        "kai": [("Blm", "dps"), ("Sch", "healer"), ("Dnc", "dps"), ("gnb", "tank")],
-        "taylor": [("Sge", "healer"), ("Pld", "tank")],
+        "Dan": [("Whm", "healer")],  # ("Blm", "dps"), ("Drk", "tank"), ("Rpr", "dps")
+        "Kattie": [("War", "tank"), ("Nnj", "dps")],
+        # "Helen": [("Brd", "dps"), ("Whm", "healer")],
+        "Kai": [("Ast", "healer"), ("Dnc", "dps"), ("Blm", "dps"), ("Gnb", "Tank")],
+        "Taylor": [
+            ("Sge", "healer"),
+            ("Pld", "tank"),
+            ("Sch", "healer"),
+            ("Sam", "dps"),
+            ("Pug", "dps"),
+        ],
     }
 ):
     # Restructure based on role
@@ -20,9 +27,9 @@ def class_randomizer(
             role_list = classes_dict.setdefault(role, [])
             role_list.append((player_name, job))
 
-    assert len(classes_dict.get("tank")) >= 1
-    assert len(classes_dict.get("healer")) >= 1
-    assert len(classes_dict.get("dps")) >= 2
+    assert len(classes_dict["tank"]) >= 1
+    assert len(classes_dict["healer"]) >= 1
+    assert len(classes_dict["dps"]) >= 2
 
     class Option(BaseModel):
         player_name: str
@@ -40,8 +47,7 @@ def class_randomizer(
     ) -> Tuple[Optional[bool], bool]:
         option_role = list(option_indexer.keys())[option_index]
         class_role = "dps" if "dps" in option_role else option_role
-        # class_role = list(classes_dict.keys())[option_indexer[option_index]]
-        choice_tuple = classes_dict.get(class_role)[option_indexer.get(option_role)]
+        choice_tuple = classes_dict[class_role][option_indexer[option_role]]
         player_name, job = choice_tuple
 
         invalid_option = False
@@ -67,7 +73,7 @@ def class_randomizer(
                 option_indexer[option_role] += 1
         else:
             option_indexer[option_role] += 1
-        if option_indexer.get(option_role) >= len(classes_dict.get(class_role)):
+        if option_indexer[option_role] >= len(classes_dict[class_role]):
             option_indexer[option_role] = 0
             return (True, invalid_option)
         else:
@@ -75,7 +81,7 @@ def class_randomizer(
 
     fill_options_semaphore = True
     while fill_options_semaphore:
-        option_list = []
+        option_list: List[Option] = []
         overflow_bool, invalid_option = fill_option(
             option_list, classes_dict, option_indexer, 0
         )
@@ -94,9 +100,10 @@ def class_randomizer(
             if not invalid_option:
                 valid_options.append(option_list)
 
-    # print(valid_options)
     return random.choice(valid_options)
 
 
 if __name__ == "__main__":
-    print(class_randomizer())
+    options = class_randomizer()
+    for option in options:
+        print(f"{option.player_name}: {option.job} ({option.role})")
