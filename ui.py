@@ -44,27 +44,30 @@ class MainWidget(QMainWindow):
 
         def add_recipes(self, recipes: RecipeCollection):
             recipe: Recipe
-            # row_data: List[Tuple[str,str,float,float,float]] = []
-            # for recipe in recipes:
-            #     row_data.append(())
-            for row_index, recipe in enumerate(recipes):
-                self.insertRow(self.rowCount())
-                self.setItem(
-                    row_index, 0, QTableWidgetItem(recipe.ClassJob.Abbreviation)
+            row_data: List[Tuple[str, str, float, float, Recipe]] = []
+            for recipe in recipes:
+                row_data.append(
+                    (
+                        recipe.ClassJob.Abbreviation,
+                        recipe.ItemResult.Name,
+                        get_profit(recipe, world),
+                        get_listings(recipe.ItemResult.ID, world).regularSaleVelocity,
+                        recipe,
+                    )
                 )
-                self.setItem(row_index, 1, QTableWidgetItem(recipe.ItemResult.Name))
-                profit = get_profit(recipe, world)
-                self.setItem(row_index, 2, QTableWidgetItem(f"{profit:,.0f}"))
-                velocity = get_listings(recipe.ItemResult.ID, world).regularSaleVelocity
+            row_data.sort(key=lambda row: row[2] * row[3], reverse=True)
+            for row_index, row in enumerate(row_data):
+                self.insertRow(self.rowCount())
+                self.setItem(row_index, 0, QTableWidgetItem(row[0]))
+                self.setItem(row_index, 1, QTableWidgetItem(row[1]))
+                self.setItem(row_index, 2, QTableWidgetItem(f"{row[2]:,.0f}"))
                 self.setItem(
                     row_index,
                     3,
-                    QTableWidgetItem(f"{velocity:.2f}"),
+                    QTableWidgetItem(f"{row[3]:.2f}"),
                 )
-                self.setItem(
-                    row_index, 4, QTableWidgetItem(f"{profit * velocity:,.0f}")
-                )
-                self.recipe_list.append(recipe)
+                self.setItem(row_index, 4, QTableWidgetItem(f"{row[2] * row[3]:,.0f}"))
+                self.recipe_list.append(row[4])
 
     def __init__(self):
         super().__init__()
@@ -97,6 +100,7 @@ class MainWidget(QMainWindow):
     @Slot()
     def on_search_return_pressed(self):
         recipes = search_recipes(self.search_qlineedit.text())
+        self.table.clear_contents()
         self.table.add_recipes(recipes)
 
     @Slot(int, int)
