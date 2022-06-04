@@ -3,12 +3,25 @@ from pydantic import BaseModel
 from pydantic_collections import BaseCollectionModel
 
 
+class ClassJobCategory(BaseModel):
+    Name: str
+
+
 class ClassJob(BaseModel):
     ID: int
     Icon: str
     Name: str
     Url: str
     Abbreviation: str
+    ClassJobCategory: Union[int, ClassJobCategory]
+
+    class Config:
+        frozen = True
+
+
+class ClassJobCollection(BaseCollectionModel[ClassJob]):
+    class Config:
+        validate_assignment_strict = False
 
 
 class Pagination(BaseModel):
@@ -33,23 +46,20 @@ class Page(BaseModel):
     Results: List[PageResult]
 
 
-class ClassJobCategory(BaseModel):
-    Name: str
-
-
-class ClassJobInfo(BaseModel):
-    Abbreviation: str
-    ClassJobCategory: ClassJobCategory
-
-
 class Item(BaseModel):
     LevelItem: int
     ID: int
     Name: str
 
+    class Config:
+        frozen = True
+
 
 class RecipeLevelTable(BaseModel):
     ClassJobLevel: int
+
+    class Config:
+        frozen = True
 
 
 class Recipe(BaseModel):
@@ -76,22 +86,21 @@ class Recipe(BaseModel):
     ItemIngredient7: Optional[Item]
     ItemIngredient8: Optional[Item]
     ItemIngredient9: Optional[Item]
-    ItemIngredientRecipe0: Optional[List["Recipe"]]
-    ItemIngredientRecipe1: Optional[List["Recipe"]]
-    ItemIngredientRecipe2: Optional[List["Recipe"]]
-    ItemIngredientRecipe3: Optional[List["Recipe"]]
-    ItemIngredientRecipe4: Optional[List["Recipe"]]
-    ItemIngredientRecipe5: Optional[List["Recipe"]]
-    ItemIngredientRecipe6: Optional[List["Recipe"]]
-    ItemIngredientRecipe7: Optional[List["Recipe"]]
-    ItemIngredientRecipe8: Optional[List["Recipe"]]
-    ItemIngredientRecipe9: Optional[List["Recipe"]]
+    ItemIngredientRecipe0: Optional[Tuple["Recipe", ...]]
+    ItemIngredientRecipe1: Optional[Tuple["Recipe", ...]]
+    ItemIngredientRecipe2: Optional[Tuple["Recipe", ...]]
+    ItemIngredientRecipe3: Optional[Tuple["Recipe", ...]]
+    ItemIngredientRecipe4: Optional[Tuple["Recipe", ...]]
+    ItemIngredientRecipe5: Optional[Tuple["Recipe", ...]]
+    ItemIngredientRecipe6: Optional[Tuple["Recipe", ...]]
+    ItemIngredientRecipe7: Optional[Tuple["Recipe", ...]]
+    ItemIngredientRecipe8: Optional[Tuple["Recipe", ...]]
+    ItemIngredientRecipe9: Optional[Tuple["Recipe", ...]]
     AmountResult: int
     ItemResult: Item
 
-
-# class RecipeCollection(BaseModel):
-#     __root__: List[Recipe] = []
+    class Config:
+        frozen = True
 
 
 class RecipeCollection(BaseCollectionModel[Recipe]):

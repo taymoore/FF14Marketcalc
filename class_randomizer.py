@@ -6,16 +6,18 @@ from pydantic import BaseModel
 # Assumes each player has at least one choice
 def class_randomizer(
     players_dict: Dict[str, List[Tuple[str, str]]] = {
-        "Dan": [("Whm", "healer")],  # ("Blm", "dps"), ("Drk", "tank"), ("Rpr", "dps")
-        "Kattie": [("War", "tank"), ("Nnj", "dps")],
+        "Dan": [("Whm", "healer"), ("Blm", "dps"), ("Drk", "tank"), ("Rpr", "dps")],
+        "Kattie": [("Nnj", "dps")],  # ("War", "tank"),
         # "Helen": [("Brd", "dps"), ("Whm", "healer")],
-        "Kai": [("Ast", "healer"), ("Dnc", "dps"), ("Blm", "dps"), ("Gnb", "Tank")],
+        "Kai": [("Ast", "healer"), ("Gnb", "Tank"), ("Dnc", "dps"), ("Blm", "dps")],
         "Taylor": [
             ("Sge", "healer"),
             ("Pld", "tank"),
             ("Sch", "healer"),
             ("Sam", "dps"),
+            ("Sum", "dps"),
             ("Pug", "dps"),
+            ("War", "tank"),
         ],
     }
 ):

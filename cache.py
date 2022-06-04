@@ -64,7 +64,7 @@ def persist_to_file(file_name: str, timeout_s: float, return_type: BaseCollectio
             if len(args) == 0:
                 if len(cache) > 0:
                     _logger.log(
-                        logging.INFO,
+                        logging.DEBUG,
                         f"Age of {file_name} Cache: {time.time() - cache['null'][1]}s",
                     )
                 if len(cache) == 0 or time.time() - cache["null"][1] > timeout_s:
@@ -73,7 +73,7 @@ def persist_to_file(file_name: str, timeout_s: float, return_type: BaseCollectio
             else:
                 if str(args) in cache:
                     _logger.log(
-                        logging.INFO,
+                        logging.DEBUG,
                         f"Age of {file_name}->{args} Cache: {time.time() - cache[str(args)][1]}s",
                     )
                 if (
