@@ -6,9 +6,9 @@ from pydantic import BaseModel
 # Assumes each player has at least one choice
 def class_randomizer(
     players_dict: Dict[str, List[Tuple[str, str]]] = {
-        "Dan": [("Whm", "healer"), ("Blm", "dps"), ("Drk", "tank"), ("Rpr", "dps")],
-        "Kattie": [("Nnj", "dps")],  # ("War", "tank"),
-        # "Helen": [("Brd", "dps"), ("Whm", "healer")],
+        # "Dan": [("Whm", "healer"), ("Blm", "dps"), ("Drk", "tank"), ("Rpr", "dps")],
+        "Katie": [("Nnj", "dps"), ("Rpr", "dps")],  # ("War", "tank"),
+        "Helen": [("Brd", "dps")],  # , ("Whm", "healer")
         "Kai": [("Ast", "healer"), ("Gnb", "Tank"), ("Dnc", "dps"), ("Blm", "dps")],
         "Taylor": [
             ("Sge", "healer"),
@@ -16,8 +16,9 @@ def class_randomizer(
             ("Sch", "healer"),
             ("Sam", "dps"),
             ("Sum", "dps"),
-            ("Pug", "dps"),
-            ("War", "tank"),
+            # ("Pug", "dps"),
+            # ("War", "tank"),
+            # ("Ast", "healer"),
         ],
     }
 ):

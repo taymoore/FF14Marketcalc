@@ -9,7 +9,7 @@ from xivapi.xivapi import (
     get_classjob_doh_list,
     get_recipes,
     get_recipes_up_to_level,
-    search_recipies,
+    search_recipes,
 )
 from universalis.universalis import get_listings
 
@@ -182,27 +182,29 @@ def get_actions_dict(recipe, world):
     return actions_dict
 
 
-def print_recipe(recipe: Recipe, world: Union[str, int]) -> None:
+def print_recipe(recipe: Recipe, world: Union[str, int]) -> str:
     # logger = logging.getLogger("recipe_output")
     # logger.setLevel(logging.INFO)
     # logger.info(
     #     f"{recipe.ItemResult.Name} expected profit: {get_profit(recipe, world)}"
     # )
-    print(f"{recipe.ItemResult.Name} expected profit: {get_profit(recipe, world):,.0f}")
+    string = ""
+    string += (
+        f"{recipe.ItemResult.Name} expected profit: {get_profit(recipe, world):,.0f}\n"
+    )
     actions_level = 0
 
     actions_dict = get_actions_dict(recipe, world)
     for actions_level, action_list in actions_dict.items():
         # logger.info(f"Level {actions_level}:")
-        print(f"Level {actions_level}:")
+        string += f"Level {actions_level}:\n"
         for actions in action_list:
             for action in actions:
                 # logger.info(
                 #     f"  {action.aquire_action.name} {action.item.Name} {action.quantity} x {action.cost}"
                 # )
-                print(
-                    f"  {action.aquire_action.name} {action.item.Name} {action.quantity} x {action.cost}"
-                )
+                string += f"  {action.aquire_action.name} {action.item.Name} {action.quantity} x {action.cost}\n"
+    return string
 
 
 if __name__ == "__main__":
@@ -221,7 +223,7 @@ if __name__ == "__main__":
         (9, 67),  # BSM
         (10, 70),  # ARM
         (11, 70),  # GSM
-        # (12, 70),  # LTW
+        (12, 20),  # LTW
         # (13, 70),  # WVR
         # (14, 70),  # ALC
         # (15, 70),  # CUL
@@ -252,7 +254,7 @@ if __name__ == "__main__":
             f"{recipe_tuple[2].ClassJob.Abbreviation}: {recipe_tuple[2].ItemResult.Name}: {recipe_tuple[0]:,.0f} at velocity {recipe_tuple[1]:.2f}. Score {recipe_tuple[0] * recipe_tuple[1]:,.0f}"
         )
     print()
-    print_recipe(recipe_profit_list[-1][2], world)
+    print(print_recipe(recipe_profit_list[-1][2], world))
 
     # recipes = get_recipes_up_to_level(classjob_id=8, classjob_level_max=3)
     # recipe_profit_list: List[Tuple[int, Recipe]] = []

@@ -82,15 +82,11 @@ def get_recipe(url) -> Recipe:
 @persist_to_file("recipe_collection.json", 3600 * 24 * 30, RecipeCollection)
 def get_recipes(classjob_id: int, classjob_level: int) -> RecipeCollection:
     recipe_collection = RecipeCollection()
-    urls = []
     for recipe_results in get_content_pages(
         f"search?filters=RecipeLevelTable.ClassJobLevel={classjob_level},ClassJob.ID={classjob_id}"
     ):
         for recipe_result in recipe_results:
-            if recipe_result.Url in urls:
-                print("huh")
             recipe_collection.append(get_recipe(recipe_result.Url))
-            urls.append(recipe_result.Url)
     return recipe_collection
 
 
@@ -106,7 +102,7 @@ def get_recipes_up_to_level(
     return recipe_collection
 
 
-def search_recipies(search_string: str) -> RecipeCollection:
+def search_recipes(search_string: str) -> RecipeCollection:
     recipe_collection = RecipeCollection()
     for results in get_content_pages(f"search?string={search_string}"):
         for recipe_result in results:
