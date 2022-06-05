@@ -1,5 +1,6 @@
 from threading import Thread
 from typing import Dict, List, Optional
+from copy import copy
 from PySide6.QtCore import Slot, Signal, QSize, QObject, QMutex, QSemaphore
 from ff14marketcalc import get_profit
 from universalis.universalis import get_listings
@@ -20,13 +21,19 @@ class Worker(QObject):
         self.classjob_level_max_dict: Dict[int, int] = classjob_level_max_dict
         self.classjob_level_current_dict: Dict[int, int] = {}
         self.process_todo_recipe_list: RecipeCollection = RecipeCollection()
-        self.processed_recipe_list: RecipeCollection = RecipeCollection()
-        # self.process_listings_list: List[Listing] = []
-
+        self._processed_recipe_list: RecipeCollection = RecipeCollection()
+        self._processed_recipe_list_mutex = QMutex()
         self.xivapi_mutex = QMutex()
         self.universalis_mutex = QMutex()
 
         self.running = True
+
+    @property
+    def processed_recipe_list(self):
+        self._processed_recipe_list_mutex.lock()
+        r = copy(self._processed_recipe_list)
+        self._processed_recipe_list_mutex.unlock()
+        return r
 
     def run(self):
         downloading_recipes = True
@@ -63,7 +70,9 @@ class Worker(QObject):
                 self.universalis_mutex.lock()
                 get_profit(recipe, self.world)
                 self.universalis_mutex.unlock()
-            self.processed_recipe_list.extend(self.process_todo_recipe_list)
+            self._processed_recipe_list_mutex.lock()
+            self._processed_recipe_list.extend(self.process_todo_recipe_list)
+            self._processed_recipe_list_mutex.unlock()
             self.process_todo_recipe_list.clear()
         self.print_status("Done")
 

@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QHeaderView,
     QAbstractItemView,
+    QPushButton,
 )
 from ff14marketcalc import get_profit, print_recipe
 from worker import Worker
@@ -82,6 +83,10 @@ class MainWindow(QMainWindow):
         self.search_qlineedit = QLineEdit(self)
         self.search_qlineedit.returnPressed.connect(self.on_search_return_pressed)
         self.search_layout.addWidget(self.search_qlineedit)
+        self.search_refresh_button = QPushButton(self)
+        self.search_refresh_button.setText("Refresh")
+        self.search_refresh_button.clicked.connect(self.on_refresh_button_clicked)
+        self.search_layout.addWidget(self.search_refresh_button)
         self.main_layout.addLayout(self.search_layout)
 
         self.table = MainWindow.TableView(self)
@@ -117,18 +122,30 @@ class MainWindow(QMainWindow):
         recipes = search_recipes(self.search_qlineedit.text())
         self.worker.xivapi_mutex.unlock()
         self.table.clear_contents()
+        self.worker.universalis_mutex.lock()
         self.table.add_recipes(recipes)
+        self.worker.universalis_mutex.unlock()
 
     @Slot(int, int)
     def on_table_double_clicked(self, row: int, column: int):
-        self.worker.xivapi_mutex.lock()
         self.worker.universalis_mutex.lock()
         self.recipe_textedit.setText(print_recipe(self.table.recipe_list[row], world))
-        self.worker.xivapi_mutex.unlock()
+        self.worker.universalis_mutex.unlock()
+
+    @Slot()
+    def on_refresh_button_clicked(self):
+        self.refresh_table()
+
+    def refresh_table(self):
+        self.table.clear_contents()
+        processed_recipes = self.worker._processed_recipe_list
+        self.worker.universalis_mutex.lock()
+        self.table.add_recipes(processed_recipes)
         self.worker.universalis_mutex.unlock()
 
     def closeEvent(self, event):
         self.worker.stop()
+        self.status_bar_label.setText("Exiting...")
         self.worker_thread.quit()
         self.worker_thread.wait()
         super().closeEvent(event)
