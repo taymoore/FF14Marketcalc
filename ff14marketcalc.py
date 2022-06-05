@@ -15,7 +15,8 @@ from universalis.universalis import get_listings
 
 _logger = logging.getLogger(__name__)
 
-DEFAULT_COST = 50000
+DEFAULT_COST = 100000
+GATHER_COST = 1000000
 
 
 class AquireAction(enum.Enum):
@@ -80,7 +81,7 @@ def get_actions(recipe: Recipe, world: Union[str, int]) -> List[Action]:
                             quantity=quantity,
                         )
                     )
-                elif cost_to_make < DEFAULT_COST:
+                elif cost_to_make < GATHER_COST:
                     action_list.append(
                         Action(
                             item=item,
@@ -95,12 +96,12 @@ def get_actions(recipe: Recipe, world: Union[str, int]) -> List[Action]:
                         Action(
                             item=item,
                             aquire_action=AquireAction.GATHER,
-                            cost=DEFAULT_COST,
+                            cost=GATHER_COST,
                             quantity=quantity,
                         )
                     )
             elif cost_to_make == 0:
-                if cost_to_buy < DEFAULT_COST:
+                if cost_to_buy < GATHER_COST:
                     action_list.append(
                         Action(
                             item=item,
@@ -114,11 +115,11 @@ def get_actions(recipe: Recipe, world: Union[str, int]) -> List[Action]:
                         Action(
                             item=item,
                             aquire_action=AquireAction.GATHER,
-                            cost=DEFAULT_COST,
+                            cost=GATHER_COST,
                             quantity=quantity,
                         )
                     )
-            elif cost_to_buy < DEFAULT_COST or cost_to_make < DEFAULT_COST:
+            elif cost_to_buy < GATHER_COST or cost_to_make < GATHER_COST:
                 if cost_to_buy < cost_to_make:
                     action_list.append(
                         Action(
@@ -143,7 +144,7 @@ def get_actions(recipe: Recipe, world: Union[str, int]) -> List[Action]:
                     Action(
                         item=item,
                         aquire_action=AquireAction.GATHER,
-                        cost=DEFAULT_COST,
+                        cost=GATHER_COST,
                         quantity=quantity,
                     )
                 )

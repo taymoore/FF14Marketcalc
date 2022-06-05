@@ -74,6 +74,8 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
+        self.refreshing_table = True
+
         self.main_layout = QVBoxLayout()
 
         self.search_layout = QHBoxLayout()
@@ -109,15 +111,32 @@ class MainWindow(QMainWindow):
 
         # https://realpython.com/python-pyqt-qthread/
         self.worker_thread = QThread(self)
-        self.worker = Worker(classjob_level_max_dict={8: 10, 9: 10}, world=world)
+        self.worker = Worker(
+            classjob_level_max_dict={
+                8: 68,
+                9: 67,
+                10: 66,
+                11: 71,
+                12: 66,
+                13: 68,
+                14: 65,
+                15: 59,
+                16: 76,
+                17: 77,
+                18: 72,
+            },
+            world=world,
+        )
         self.worker.moveToThread(self.worker_thread)
         self.worker_thread.started.connect(self.worker.run)
         self.worker_thread.finished.connect(self.worker.deleteLater)
         self.worker.status_bar_update_signal.connect(self.status_bar_label.setText)
+        self.worker.table_refresh_signal.connect(self.on_worker_update)
         self.worker_thread.start()
 
     @Slot()
     def on_search_return_pressed(self):
+        self.refreshing_table = False
         self.worker.xivapi_mutex.lock()
         recipes = search_recipes(self.search_qlineedit.text())
         self.worker.xivapi_mutex.unlock()
@@ -134,6 +153,11 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def on_refresh_button_clicked(self):
+        self.refreshing_table = True
+        self.refresh_table()
+
+    @Slot()
+    def on_worker_update(self):
         self.refresh_table()
 
     def refresh_table(self):
