@@ -1,7 +1,7 @@
 import enum
 from functools import cache
 import logging
-from typing import Dict, Optional, Tuple, List, Union
+from typing import Callable, Any, Dict, Iterable, Mapping, Optional, Tuple, List, Union
 
 from pydantic import BaseModel
 from xivapi.models import Item, Recipe

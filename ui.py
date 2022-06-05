@@ -1,5 +1,5 @@
 from typing import List, Tuple
-from PySide6.QtCore import Slot, Signal, QSize
+from PySide6.QtCore import Slot, Signal, QSize, QThread
 from PySide6.QtWidgets import (
     QApplication,
     QWidget,
@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
 )
 from ff14marketcalc import get_profit, print_recipe
+from worker import Worker
 from universalis.universalis import get_listings
 from xivapi.models import Recipe, RecipeCollection
 from xivapi.xivapi import get_classjob_doh_list, search_recipes
@@ -22,7 +23,7 @@ from xivapi.xivapi import get_classjob_doh_list, search_recipes
 world = 55
 
 
-class MainWidget(QMainWindow):
+class MainWindow(QMainWindow):
     class TableView(QTableWidget):
         def __init__(self, *args):
             super().__init__(*args)
@@ -83,7 +84,7 @@ class MainWidget(QMainWindow):
         self.search_layout.addWidget(self.search_qlineedit)
         self.main_layout.addLayout(self.search_layout)
 
-        self.table = MainWidget.TableView(self)
+        self.table = MainWindow.TableView(self)
         self.table.cellDoubleClicked.connect(self.on_table_double_clicked)
         self.main_layout.addWidget(self.table)
 
@@ -93,25 +94,50 @@ class MainWidget(QMainWindow):
         self.layout_widget = QWidget()
         self.layout_widget.setLayout(self.main_layout)
         self.setCentralWidget(self.layout_widget)
+
+        self.status_bar_label = QLabel()
+        self.statusBar().addPermanentWidget(self.status_bar_label, 1)
+
         self.setMinimumSize(QSize(400, 600))
 
         # classjob_list = get_classjob_doh_list()
 
+        # https://realpython.com/python-pyqt-qthread/
+        self.worker_thread = QThread(self)
+        self.worker = Worker(classjob_level_max_dict={8: 10, 9: 10}, world=world)
+        self.worker.moveToThread(self.worker_thread)
+        self.worker_thread.started.connect(self.worker.run)
+        self.worker_thread.finished.connect(self.worker.deleteLater)
+        self.worker.status_bar_update_signal.connect(self.status_bar_label.setText)
+        self.worker_thread.start()
+
     @Slot()
     def on_search_return_pressed(self):
+        self.worker.xivapi_mutex.lock()
         recipes = search_recipes(self.search_qlineedit.text())
+        self.worker.xivapi_mutex.unlock()
         self.table.clear_contents()
         self.table.add_recipes(recipes)
 
     @Slot(int, int)
     def on_table_double_clicked(self, row: int, column: int):
+        self.worker.xivapi_mutex.lock()
+        self.worker.universalis_mutex.lock()
         self.recipe_textedit.setText(print_recipe(self.table.recipe_list[row], world))
+        self.worker.xivapi_mutex.unlock()
+        self.worker.universalis_mutex.unlock()
+
+    def closeEvent(self, event):
+        self.worker.stop()
+        self.worker_thread.quit()
+        self.worker_thread.wait()
+        super().closeEvent(event)
 
 
 if __name__ == "__main__":
     app = QApplication([])
 
-    widget = MainWidget()
-    widget.show()
+    main_window = MainWindow()
+    main_window.show()
 
     app.exec()
