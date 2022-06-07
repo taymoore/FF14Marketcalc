@@ -1,4 +1,5 @@
 from typing import List, Tuple
+import pyperclip
 from PySide6.QtCore import Slot, Signal, QSize, QThread
 from PySide6.QtWidgets import (
     QApplication,
@@ -37,7 +38,7 @@ class MainWindow(QMainWindow):
 
             self.setEditTriggers(QAbstractItemView.NoEditTriggers)
 
-            self.recipe_list = []
+            self.recipe_list: List[Recipe] = []
 
         def clear_contents(self) -> None:
             self.clearContents()
@@ -113,17 +114,14 @@ class MainWindow(QMainWindow):
         self.worker_thread = QThread(self)
         self.worker = Worker(
             classjob_level_max_dict={
-                8: 68,
-                9: 67,
-                10: 66,
+                8: 69,
+                9: 68,
+                10: 67,
                 11: 71,
-                12: 66,
-                13: 68,
-                14: 65,
-                15: 59,
-                16: 76,
-                17: 77,
-                18: 72,
+                12: 67,
+                13: 69,
+                14: 68,
+                15: 61,
             },
             world=world,
         )
@@ -147,6 +145,7 @@ class MainWindow(QMainWindow):
 
     @Slot(int, int)
     def on_table_double_clicked(self, row: int, column: int):
+        pyperclip.copy(self.table.recipe_list[row].ItemResult.Name)
         self.worker.universalis_mutex.lock()
         self.recipe_textedit.setText(print_recipe(self.table.recipe_list[row], world))
         self.worker.universalis_mutex.unlock()
@@ -164,6 +163,7 @@ class MainWindow(QMainWindow):
         self.table.clear_contents()
         processed_recipes = self.worker._processed_recipe_list
         self.worker.universalis_mutex.lock()
+        # TODO: Make this non-blocking
         self.table.add_recipes(processed_recipes)
         self.worker.universalis_mutex.unlock()
 

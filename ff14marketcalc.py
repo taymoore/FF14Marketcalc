@@ -49,7 +49,7 @@ def get_actions(recipe: Recipe, world: Union[str, int]) -> List[Action]:
                 for ingredient_recipe in ingredient_recipes:
                     cost_to_make_ingredient = sum(
                         [
-                            action.cost
+                            action.cost * action.quantity
                             for action in get_actions(ingredient_recipe, world)
                         ]
                     )
@@ -161,25 +161,31 @@ def get_profit(recipe: Recipe, world: Union[str, int]) -> int:
     _logger.log(logging.DEBUG, f"Revenue for {recipe.ItemResult.Name} is {revenue}")
     if revenue == 0:
         return 0
-    return revenue - sum([action.cost for action in get_actions(recipe, world)])
+    return revenue - sum(
+        [action.cost * action.quantity for action in get_actions(recipe, world)]
+    )
 
 
 def get_actions_dict(recipe, world):
     def aquire_actions(
-        recipe: Recipe, actions_dict: Dict[int, List[List[Action]]], actions_level: int
+        recipe: Recipe,
+        quantity: int,
+        actions_dict: Dict[int, List[List[Action]]],
+        actions_level: int,
     ) -> Dict[int, List[List[Action]]]:
-        actions_dict.setdefault(actions_level, []).append(
-            actions := get_actions(recipe, world)
-        )
+        actions = get_actions(recipe, world)
+        for action in actions:
+            action.quantity *= quantity
+        actions_dict.setdefault(actions_level, []).append(actions)
         actions_level += 1
         for action in actions:
             if action.aquire_action == AquireAction.CRAFT:
                 actions_dict = aquire_actions(
-                    action.recipe, actions_dict, actions_level
+                    action.recipe, action.quantity, actions_dict, actions_level
                 )
         return actions_dict
 
-    actions_dict = aquire_actions(recipe, {}, 0)
+    actions_dict = aquire_actions(recipe, 1, {}, 0)
     return actions_dict
 
 
@@ -190,9 +196,8 @@ def print_recipe(recipe: Recipe, world: Union[str, int]) -> str:
     #     f"{recipe.ItemResult.Name} expected profit: {get_profit(recipe, world)}"
     # )
     string = ""
-    string += (
-        f"{recipe.ItemResult.Name} expected profit: {get_profit(recipe, world):,.0f}\n"
-    )
+    string += f"{recipe.ItemResult.Name} sells for: {get_listings(recipe.ItemResult.ID, world).averagePrice:,.0f}\n"
+    string += f"Expected profit: {get_profit(recipe, world):,.0f}\n"
     actions_level = 0
 
     actions_dict = get_actions_dict(recipe, world)
