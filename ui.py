@@ -47,7 +47,7 @@ class MainWindow(QMainWindow):
 
         def add_recipes(self, recipes: RecipeCollection):
             recipe: Recipe
-            row_data: List[Tuple[str, str, float, float, Recipe]] = []
+            row_data: List[Tuple[str, str, float, float, Recipe]] = []  # class, item_name, profit, velocity, recipe
             for recipe in recipes:
                 row_data.append(
                     (
@@ -71,6 +71,8 @@ class MainWindow(QMainWindow):
                 )
                 self.setItem(row_index, 4, QTableWidgetItem(f"{row[2] * row[3]:,.0f}"))
                 self.recipe_list.append(row[4])
+        
+        queue_worker_task = Signal()
 
     def __init__(self):
         super().__init__()
@@ -125,6 +127,7 @@ class MainWindow(QMainWindow):
             },
             world=world,
         )
+        self.worker_queue_recipe_list: List[Recipe] = []    # Respective mutex is self.queue_worker_task
         self.worker.moveToThread(self.worker_thread)
         self.worker_thread.started.connect(self.worker.run)
         self.worker_thread.finished.connect(self.worker.deleteLater)

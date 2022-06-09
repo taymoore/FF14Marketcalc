@@ -36,6 +36,17 @@ class Worker(QObject):
         self._processed_recipe_list_mutex.unlock()
         return r
 
+    def refresh_listings(self, recipe_list: List[Recipe]) -> None:
+        for recipe_index, recipe in enumerate(recipe_list):
+            self.print_status(
+                f"Refreshing marketboard data {recipe_index+1}/{len(recipe_list)} ({recipe.ItemResult.Name})..."
+            )
+            self.universalis_mutex.lock()
+            get_listings(recipe.ItemResult.ID, self.world)
+            self.universalis_mutex.unlock()
+            if not self.running:
+                break
+
     def run(self):
         downloading_recipes = True
         while downloading_recipes:
@@ -74,7 +85,7 @@ class Worker(QObject):
                 if not self.running:
                     downloading_recipes = False
                     break
-            if not downloading_recipes:
+            if not downloading_recipes or not self.running:
                 break
             self._processed_recipe_list_mutex.lock()
             self._processed_recipe_list.extend(self.process_todo_recipe_list)

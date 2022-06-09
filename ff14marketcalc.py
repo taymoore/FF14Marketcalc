@@ -33,7 +33,6 @@ class Action(BaseModel):
     quantity: int
 
 
-@cache
 def get_actions(recipe: Recipe, world: Union[str, int]) -> List[Action]:
     action_list: List[Action] = []
     for ingredient_index in range(9):
