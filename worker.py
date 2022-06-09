@@ -87,6 +87,7 @@ class Worker(QObject):
                     break
             if not downloading_recipes or not self.running:
                 break
+            self.refresh_listings(self._processed_recipe_list)
             self._processed_recipe_list_mutex.lock()
             self._processed_recipe_list.extend(self.process_todo_recipe_list)
             self._processed_recipe_list_mutex.unlock()
