@@ -5,9 +5,9 @@ from PySide6.QtCore import Slot, Signal, QSize, QObject, QMutex, QSemaphore, QTh
 from ff14marketcalc import get_profit
 from universalis.universalis import get_listings
 
-from xivapi.models import Recipe, RecipeCollection
+from xivapi.models import ClassJob, Recipe, RecipeCollection
 from universalis.models import Listing
-from xivapi.xivapi import get_recipes
+from xivapi.xivapi import get_classjob_doh_list, get_recipes
 
 
 class Worker(QObject):
@@ -54,6 +54,9 @@ class Worker(QObject):
             self.table_refresh_signal.emit()
 
     def run(self):
+        self.print_status("Getting DOH Classjob list")
+        classjob_list = get_classjob_doh_list()
+
         downloading_recipes = True
         while downloading_recipes:
             downloading_recipes = False
@@ -63,8 +66,13 @@ class Worker(QObject):
                         classjob_id, self.classjob_level_max_dict[classjob_id]
                     )
                 ) > 0:
+                    classjob: ClassJob = list(
+                        filter(
+                            lambda classjob: classjob.ID == classjob_id, classjob_list
+                        )
+                    )[0]
                     self.print_status(
-                        f"Getting recipes for class {classjob_id} level {classjob_level}..."
+                        f"Getting recipes for class {classjob.Abbreviation} level {classjob_level}..."
                     )
                     self.xivapi_mutex.lock()
                     self.process_todo_recipe_list.extend(

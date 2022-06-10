@@ -27,6 +27,7 @@ def class_randomizer(
     for player_name, choices_list in players_dict.items():
         for choice_tuple in choices_list:
             job, role = choice_tuple
+            role = str.lower(role)
             role_list = classes_dict.setdefault(role, [])
             role_list.append((player_name, job))
 
@@ -82,14 +83,14 @@ def class_randomizer(
         else:
             return (False, invalid_option)
 
-    fill_options_semaphore = True
-    while fill_options_semaphore:
+    fill_options_flag = True
+    while fill_options_flag:
         option_list: List[Option] = []
         overflow_bool, invalid_option = fill_option(
             option_list, classes_dict, option_indexer, 0
         )
         if overflow_bool:
-            fill_options_semaphore = False
+            fill_options_flag = False
         if not invalid_option:
             # Remove identical configuration with alternate arrangements
             for configuration in valid_options:

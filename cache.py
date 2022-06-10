@@ -56,7 +56,7 @@ def persist_to_file(file_name: str, timeout_s: float, return_type: BaseCollectio
         def new_func(*args, cache_timeout_s: Optional[float] = None, **kwargs):
             _timeout_s = cache_timeout_s if cache_timeout_s is not None else timeout_s
             if args is None:
-                _args: List[Any] = []
+                _args: Union[List[Any], str] = []
             else:
                 _args = list(args)
             if kwargs is not None:
@@ -71,7 +71,7 @@ def persist_to_file(file_name: str, timeout_s: float, return_type: BaseCollectio
                     )
                 if len(cache) == 0 or time.time() - cache["null"][1] > _timeout_s:
                     cache["null"] = (func(), time.time())
-                _args = ["null"]
+                _args = "null"
             else:
                 if str(_args) in cache:
                     _logger.log(
