@@ -1,7 +1,7 @@
 from threading import Thread
 from typing import Dict, List, Optional
 from copy import copy
-from PySide6.QtCore import Slot, Signal, QSize, QObject, QMutex, QSemaphore
+from PySide6.QtCore import Slot, Signal, QSize, QObject, QMutex, QSemaphore, QThread
 from ff14marketcalc import get_profit
 from universalis.universalis import get_listings
 
@@ -13,6 +13,7 @@ from xivapi.xivapi import get_recipes
 class Worker(QObject):
     status_bar_update_signal = Signal(str)
     table_refresh_signal = Signal()
+    refresh_recipe_request_sem = QSemaphore()
 
     def __init__(
         self, world: int, classjob_level_max_dict: Dict[int, int] = {}
@@ -47,6 +48,11 @@ class Worker(QObject):
             if not self.running:
                 break
 
+    def service_requests(self):
+        if self.refresh_recipe_request_sem.tryAcquire():
+            self.refresh_listings(self.processed_recipe_list)
+            self.table_refresh_signal.emit()
+
     def run(self):
         downloading_recipes = True
         while downloading_recipes:
@@ -72,6 +78,8 @@ class Worker(QObject):
                 if not self.running:
                     downloading_recipes = False
                     break
+                else:
+                    self.service_requests()
             if not downloading_recipes:
                 break
             recipe: Recipe
@@ -85,6 +93,8 @@ class Worker(QObject):
                 if not self.running:
                     downloading_recipes = False
                     break
+                else:
+                    self.service_requests()
             if not downloading_recipes or not self.running:
                 break
             self.refresh_listings(self._processed_recipe_list)
@@ -96,6 +106,13 @@ class Worker(QObject):
         self.print_status("Done")
         # TODO: Loop through listings to keep them fresh
         # QtCore.QThread.sleep(...)
+        while downloading_recipes and self.running:
+            self.refresh_listings(self.process_todo_recipe_list)
+            sleep_ctr = 30
+            while sleep_ctr > 0:
+                QThread.sleep(1)
+                sleep_ctr -= 1
+                self.service_requests()
 
     def print_status(self, string: str) -> None:
         self.status_bar_update_signal.emit(string)

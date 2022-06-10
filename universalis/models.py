@@ -4,11 +4,11 @@ from pydantic_collections import BaseCollectionModel
 
 
 class Listing(BaseModel):
-    lastReviewTime: int
+    lastReviewTime: Optional[int]
     pricePerUnit: int
     quantity: int
     hq: bool
-    isCrafted: bool
+    isCrafted: Optional[bool]
     total: int
 
 
@@ -22,6 +22,7 @@ class Listings(BaseModel):
     worldID: Optional[int]
     lastUploadTime: int
     listings: List[Listing]
+    recentHistory: List[Listing]
     currentAveragePrice: float
     currentAveragePriceNQ: float
     currentAveragePriceHQ: float

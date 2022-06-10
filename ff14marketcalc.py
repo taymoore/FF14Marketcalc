@@ -33,7 +33,9 @@ class Action(BaseModel):
     quantity: int
 
 
-def get_actions(recipe: Recipe, world: Union[str, int]) -> List[Action]:
+def get_actions(
+    recipe: Recipe, world: Union[str, int], refresh_cache: bool = False
+) -> List[Action]:
     action_list: List[Action] = []
     for ingredient_index in range(9):
         quantity: int = getattr(recipe, f"AmountIngredient{ingredient_index}")
@@ -49,7 +51,9 @@ def get_actions(recipe: Recipe, world: Union[str, int]) -> List[Action]:
                     cost_to_make_ingredient = sum(
                         [
                             action.cost * action.quantity
-                            for action in get_actions(ingredient_recipe, world)
+                            for action in get_actions(
+                                ingredient_recipe, world, refresh_cache
+                            )
                         ]
                     )
                     if cost_to_make == 0 or cost_to_make_ingredient < cost_to_make:
@@ -60,7 +64,9 @@ def get_actions(recipe: Recipe, world: Union[str, int]) -> List[Action]:
                     f"Ingredient for {recipe.ItemResult.Name}, {item.Name} to make costs {quantity} x {cost_to_make}: {quantity * cost_to_make}",
                 )
             # Assumes infinite availablity of this item at minPrice
-            cost_to_buy = get_listings(item.ID, world).minPrice
+            cost_to_buy = get_listings(
+                item.ID, world, cache_timeout_s=60 if refresh_cache else None
+            ).minPrice
             # cost_to_buy = get_listings(item.ID, world).minPrice
             _logger.log(
                 logging.DEBUG,
@@ -68,10 +74,6 @@ def get_actions(recipe: Recipe, world: Union[str, int]) -> List[Action]:
             )
             if cost_to_buy == 0:
                 if cost_to_make == 0:
-                    _logger.log(
-                        logging.WARN,
-                        f"Item {recipe.ItemResult} has no cost! Using {DEFAULT_COST}",
-                    )
                     action_list.append(
                         Action(
                             item=item,
@@ -155,24 +157,29 @@ def get_actions(recipe: Recipe, world: Union[str, int]) -> List[Action]:
     return action_list
 
 
-def get_profit(recipe: Recipe, world: Union[str, int]) -> int:
-    revenue = get_listings(recipe.ItemResult.ID, world).averagePrice
+def get_profit(
+    recipe: Recipe, world: Union[str, int], refresh_cache: bool = False
+) -> float:
+    revenue = get_revenue(recipe.ItemResult.ID, world, refresh_cache)
     _logger.log(logging.DEBUG, f"Revenue for {recipe.ItemResult.Name} is {revenue}")
     if revenue == 0:
         return 0
     return revenue - sum(
-        [action.cost * action.quantity for action in get_actions(recipe, world)]
+        [
+            action.cost * action.quantity
+            for action in get_actions(recipe, world, refresh_cache=refresh_cache)
+        ]
     )
 
 
-def get_actions_dict(recipe, world):
+def get_actions_dict(recipe, world, refresh_cache: bool = False):
     def aquire_actions(
         recipe: Recipe,
         quantity: int,
         actions_dict: Dict[int, List[List[Action]]],
         actions_level: int,
     ) -> Dict[int, List[List[Action]]]:
-        actions = get_actions(recipe, world)
+        actions = get_actions(recipe, world, refresh_cache)
         for action in actions:
             action.quantity *= quantity
         actions_dict.setdefault(actions_level, []).append(actions)
@@ -188,26 +195,39 @@ def get_actions_dict(recipe, world):
     return actions_dict
 
 
+def get_revenue(id: int, world, refresh_cache: bool = False) -> float:
+    listings = get_listings(id, world, cache_timeout_s=60 if refresh_cache else None)
+    history_price = [listing.pricePerUnit for listing in listings.recentHistory]
+    # history_price_avg = sum(history_price) / len(history_price)
+    return (
+        min(min(history_price), listings.minPrice / 1.05)
+        if len(history_price) > 0
+        else listings.minPrice / 1.05
+    )
+
+
 def print_recipe(recipe: Recipe, world: Union[str, int]) -> str:
-    # logger = logging.getLogger("recipe_output")
-    # logger.setLevel(logging.INFO)
-    # logger.info(
-    #     f"{recipe.ItemResult.Name} expected profit: {get_profit(recipe, world)}"
-    # )
     string = ""
-    string += f"{recipe.ItemResult.Name} sells for: {get_listings(recipe.ItemResult.ID, world).averagePrice:,.0f}\n"
-    string += f"Expected profit: {get_profit(recipe, world):,.0f}\n"
+    string += f"{recipe.ItemResult.Name} sells for: {get_revenue(recipe.ItemResult.ID, world, True):,.0f}\n"
+    string += f"Expected profit: {get_profit(recipe, world, True):,.0f}\n"
+
+    listings = get_listings(id=recipe.ItemResult.ID, world=world, cache_timeout_s=60)
+    string += f"Quantity for sale: {len(listings.listings)}\n"
+
+    history_price = [listing.pricePerUnit for listing in listings.recentHistory]
+    if len(history_price) > 0:
+        string += f"Average history: {sum(history_price)/len(history_price):,.0f}\n"
+        string += f"Min history: {min(history_price):,.0f}\n"
+    else:
+        string += "No price history\n"
+
     actions_level = 0
 
-    actions_dict = get_actions_dict(recipe, world)
+    actions_dict = get_actions_dict(recipe, world, refresh_cache=True)
     for actions_level, action_list in actions_dict.items():
-        # logger.info(f"Level {actions_level}:")
         string += f"Level {actions_level}:\n"
         for actions in action_list:
             for action in actions:
-                # logger.info(
-                #     f"  {action.aquire_action.name} {action.item.Name} {action.quantity} x {action.cost}"
-                # )
                 string += f"  {action.aquire_action.name} {action.item.Name} {action.quantity} x {action.cost}\n"
     return string
 

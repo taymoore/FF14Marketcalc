@@ -1,6 +1,6 @@
 from typing import List, Tuple
 import pyperclip
-from PySide6.QtCore import Slot, Signal, QSize, QThread
+from PySide6.QtCore import Slot, Signal, QSize, QThread, QSemaphore
 from PySide6.QtWidgets import (
     QApplication,
     QWidget,
@@ -26,7 +26,7 @@ world = 55
 
 
 class MainWindow(QMainWindow):
-    class TableView(QTableWidget):
+    class RecipeListTable(QTableWidget):
         def __init__(self, *args):
             super().__init__(*args)
             self.setColumnCount(5)
@@ -47,7 +47,9 @@ class MainWindow(QMainWindow):
 
         def add_recipes(self, recipes: RecipeCollection):
             recipe: Recipe
-            row_data: List[Tuple[str, str, float, float, Recipe]] = []  # class, item_name, profit, velocity, recipe
+            row_data: List[
+                Tuple[str, str, float, float, Recipe]
+            ] = []  # class, item_name, profit, velocity, recipe
             for recipe in recipes:
                 row_data.append(
                     (
@@ -71,8 +73,27 @@ class MainWindow(QMainWindow):
                 )
                 self.setItem(row_index, 4, QTableWidgetItem(f"{row[2] * row[3]:,.0f}"))
                 self.recipe_list.append(row[4])
-        
+
         queue_worker_task = Signal()
+
+    # class RecipeInstructionsTable(QTableWidget):
+    #     def __init__(self, *args):
+    #         super().__init__(*args)
+    #         self.setColumnCount(5)
+    #         self.setHorizontalHeaderLabels(
+    #             ["Job", "Item", "Profit", "Velocity", "Score"]
+    #         )
+    #         self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+    #         self.verticalHeader().hide()
+
+    #         self.setEditTriggers(QAbstractItemView.NoEditTriggers)
+
+    #         self.recipe_list: List[Recipe] = []
+
+    #     def clear_contents(self) -> None:
+    #         self.clearContents()
+    #         self.setRowCount(0)
+    #         self.recipe_list.clear()
 
     def __init__(self):
         super().__init__()
@@ -94,7 +115,7 @@ class MainWindow(QMainWindow):
         self.search_layout.addWidget(self.search_refresh_button)
         self.main_layout.addLayout(self.search_layout)
 
-        self.table = MainWindow.TableView(self)
+        self.table = MainWindow.RecipeListTable(self)
         self.table.cellDoubleClicked.connect(self.on_table_double_clicked)
         self.main_layout.addWidget(self.table)
 
@@ -127,7 +148,9 @@ class MainWindow(QMainWindow):
             },
             world=world,
         )
-        self.worker_queue_recipe_list: List[Recipe] = []    # Respective mutex is self.queue_worker_task
+        self.worker_queue_recipe_list: List[
+            Recipe
+        ] = []  # Respective mutex is self.queue_worker_task
         self.worker.moveToThread(self.worker_thread)
         self.worker_thread.started.connect(self.worker.run)
         self.worker_thread.finished.connect(self.worker.deleteLater)
@@ -148,7 +171,9 @@ class MainWindow(QMainWindow):
 
     @Slot(int, int)
     def on_table_double_clicked(self, row: int, column: int):
-        pyperclip.copy(self.table.recipe_list[row].ItemResult.Name)
+        item_name = self.table.recipe_list[row].ItemResult.Name
+        pyperclip.copy(item_name)
+        self.status_bar_label.setText(f"Processing {item_name}...")
         self.worker.universalis_mutex.lock()
         self.recipe_textedit.setText(print_recipe(self.table.recipe_list[row], world))
         self.worker.universalis_mutex.unlock()
@@ -156,11 +181,13 @@ class MainWindow(QMainWindow):
     @Slot()
     def on_refresh_button_clicked(self):
         self.refreshing_table = True
-        self.refresh_table()
+        self.worker.refresh_recipe_request_sem.release()
+        # self.refresh_table()
 
     @Slot()
     def on_worker_update(self):
-        self.refresh_table()
+        if self.refreshing_table:
+            self.refresh_table()
 
     def refresh_table(self):
         self.table.clear_contents()

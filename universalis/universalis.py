@@ -1,4 +1,4 @@
-from typing import TypeVar, Union
+from typing import Optional, TypeVar, Union
 import logging
 import time
 from pydantic import BaseModel
@@ -14,7 +14,9 @@ get_content_time = time.time() - GET_CONTENT_RATE
 
 
 @persist_to_file("listings.json", 3600 * 2, Listings)
-def get_listings(id: int, world: Union[int, str]) -> Listings:
+def get_listings(
+    id: int, world: Union[int, str], cache_timeout_s: Optional[float] = None
+) -> Listings:
     url = f"https://universalis.app/api/v2/{world}/{id}"
     global get_content_time
     now_time = time.time()

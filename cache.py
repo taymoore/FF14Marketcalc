@@ -1,4 +1,4 @@
-from functools import cache, partial
+from functools import cache, partial, wraps
 from typing import (
     Any,
     Callable,
@@ -52,37 +52,39 @@ def persist_to_file(file_name: str, timeout_s: float, return_type: BaseCollectio
     atexit.register(partial(save_to_disk, cache, file_name, return_type))
 
     def decorator(func):
-        def new_func(*args, **kwargs):
+        @wraps(func)
+        def new_func(*args, cache_timeout_s: Optional[float] = None, **kwargs):
+            _timeout_s = cache_timeout_s if cache_timeout_s is not None else timeout_s
             if args is None:
-                args = []
+                _args: List[Any] = []
             else:
-                args = list(args)
+                _args = list(args)
             if kwargs is not None:
                 for kwarg_value in kwargs.values():
-                    args.append(kwarg_value)
+                    _args.append(kwarg_value)
 
-            if len(args) == 0:
+            if len(_args) == 0:
                 if len(cache) > 0:
                     _logger.log(
                         logging.DEBUG,
                         f"Age of {file_name} Cache: {time.time() - cache['null'][1]}s",
                     )
-                if len(cache) == 0 or time.time() - cache["null"][1] > timeout_s:
+                if len(cache) == 0 or time.time() - cache["null"][1] > _timeout_s:
                     cache["null"] = (func(), time.time())
-                args = "null"
+                _args = ["null"]
             else:
-                if str(args) in cache:
+                if str(_args) in cache:
                     _logger.log(
                         logging.DEBUG,
-                        f"Age of {file_name}->{args} Cache: {time.time() - cache[str(args)][1]}s",
+                        f"Age of {file_name}->{_args} Cache: {time.time() - cache[str(_args)][1]}s",
                     )
                 if (
-                    str(args) not in cache
-                    or time.time() - cache[str(args)][1] > timeout_s
+                    str(_args) not in cache
+                    or time.time() - cache[str(_args)][1] > _timeout_s
                 ):
-                    cache[str(args)] = (func(*args), time.time())
+                    cache[str(_args)] = (func(*_args), time.time())
 
-            return cache[str(args)][0]
+            return cache[str(_args)][0]
 
         return new_func
 
