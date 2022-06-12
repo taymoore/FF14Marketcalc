@@ -6,20 +6,25 @@ from pydantic import BaseModel
 # Assumes each player has at least one choice
 def class_randomizer(
     players_dict: Dict[str, List[Tuple[str, str]]] = {
-        # "Dan": [("Whm", "healer"), ("Blm", "dps"), ("Drk", "tank"), ("Rpr", "dps")],
-        "Katie": [("Nnj", "dps"), ("Rpr", "dps")],  # ("War", "tank"),
-        "Helen": [("Brd", "dps")],  # , ("Whm", "healer")
-        "Kai": [("Ast", "healer"), ("Gnb", "Tank"), ("Dnc", "dps"), ("Blm", "dps")],
-        "Taylor": [
-            ("Sge", "healer"),
-            ("Pld", "tank"),
-            ("Sch", "healer"),
-            ("Sam", "dps"),
-            ("Sum", "dps"),
-            # ("Pug", "dps"),
-            # ("War", "tank"),
-            # ("Ast", "healer"),
-        ],
+        "Dan": [("", "dps"), ("", "tank"), ("", "healer")],
+        "Katie": [("", "tank")],  # , ("", "healer"), ("", "dps"),
+        "Kai": [("", "dps"), ("", "tank"), ("", "healer")],
+        "Taylor": [("", "dps"), ("", "tank"), ("", "healer")],
+        # "Dan": [("Blm", "dps"), ("Drk", "tank"), ("Rpr", "dps")],  # ("Whm", "healer"),
+        # "Katie": [("Nnj", "dps"), ("War", "tank")],  # ("Rpr", "dps"),
+        # # "Helen": [("Brd", "dps"), ("Whm", "healer")],
+        # "Kai": [("Gnb", "tank"), ("Dnc", "dps"), ("Blm", "dps"), ("Ast", "healer")],  #
+        # "Taylor": [
+        #     ("Sge", "healer"),  # 72
+        #     ("Pld", "tank"),  # 63
+        #     ("Sch", "healer"),  # 61
+        #     # ("Sam", "dps"),  # 53
+        #     ("Sum", "dps"),
+        #     # ("Pug", "dps"),  #
+        #     # ("War", "tank"),  #
+        #     # ("Ast", "healer"),  # 32
+        #     ("Rdm", "dps"),  # 75
+        # ],
     }
 ):
     # Restructure based on role
@@ -104,6 +109,10 @@ def class_randomizer(
             if not invalid_option:
                 valid_options.append(option_list)
 
+    for options in valid_options:
+        for option in options:
+            print(f"{option.player_name}: {option.job} ({option.role})")
+        print("---")
     return random.choice(valid_options)
 
 

@@ -4,6 +4,7 @@ import logging
 from typing import Callable, Any, Dict, Iterable, Mapping, Optional, Tuple, List, Union
 
 from pydantic import BaseModel
+from universalis.models import Listings
 from xivapi.models import Item, Recipe
 from xivapi.xivapi import (
     get_classjob_doh_list,
@@ -261,7 +262,9 @@ if __name__ == "__main__":
                 classjob_id=classjob_id, classjob_level_max=classjob_level
             )
         )
-    recipe_profit_list: List[Tuple[int, float, Recipe]] = []  # profit, velocity, recipe
+    recipe_profit_list: List[
+        Tuple[float, Listings, Recipe]
+    ] = []  # profit, velocity, recipe
     recipe: Recipe
     for recipe in recipes:
         profit = get_profit(recipe, world)

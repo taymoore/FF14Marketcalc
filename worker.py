@@ -1,25 +1,26 @@
-from threading import Thread
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from copy import copy
 from PySide6.QtCore import Slot, Signal, QSize, QObject, QMutex, QSemaphore, QThread
 from ff14marketcalc import get_profit
 from universalis.universalis import get_listings
 
 from xivapi.models import ClassJob, Recipe, RecipeCollection
-from universalis.models import Listing
+from universalis.models import Listing, Listings
 from xivapi.xivapi import get_classjob_doh_list, get_recipes
 
 
 class Worker(QObject):
     status_bar_update_signal = Signal(str)
     table_refresh_signal = Signal()
+    retainer_listings_changed = Signal(Listings)
     refresh_recipe_request_sem = QSemaphore()
 
     def __init__(
-        self, world: int, classjob_level_max_dict: Dict[int, int] = {}
+        self, world: int, seller_id: str, classjob_level_max_dict: Dict[int, int] = {}
     ) -> None:
         super().__init__()
         self.world = world
+        self.seller_id = seller_id
         self.classjob_level_max_dict: Dict[int, int] = classjob_level_max_dict
         self.classjob_level_current_dict: Dict[int, int] = {}
         self.process_todo_recipe_list: RecipeCollection = RecipeCollection()
@@ -27,6 +28,10 @@ class Worker(QObject):
         self._processed_recipe_list_mutex = QMutex()
         self.xivapi_mutex = QMutex()
         self.universalis_mutex = QMutex()
+        self._table_row_data: List[Tuple[str, str, float, float, Recipe]] = []
+        self._table_row_data_mutex = QMutex()
+        # self._retainer_listings_list: List[Listings] = []
+        # self._retainer_listings_list_mutex = QMutex()
 
         self.running = True
 
@@ -37,21 +42,60 @@ class Worker(QObject):
         self._processed_recipe_list_mutex.unlock()
         return r
 
+    @property
+    def table_row_data(self):
+        self._table_row_data_mutex.lock()
+        r = copy(self._table_row_data)
+        self._table_row_data_mutex.unlock()
+        return r
+
+    # @property
+    # def retainer_listings_list(self):
+    #     self._retainer_listings_list_mutex.lock()
+    #     r = copy(self._retainer_listings_list)
+    #     self._retainer_listings_list_mutex.unlock()
+    #     return r
+
     def refresh_listings(self, recipe_list: List[Recipe]) -> None:
         for recipe_index, recipe in enumerate(recipe_list):
             self.print_status(
                 f"Refreshing marketboard data {recipe_index+1}/{len(recipe_list)} ({recipe.ItemResult.Name})..."
             )
             self.universalis_mutex.lock()
-            get_listings(recipe.ItemResult.ID, self.world)
+            listings = get_listings(recipe.ItemResult.ID, self.world)
             self.universalis_mutex.unlock()
+            if any(listing.sellerID == self.seller_id for listing in listings.listings):
+                self.retainer_listings_changed.emit(listings)
+                # self._retainer_listings_list_mutex.lock()
+                # if listings not in self._retainer_listings_list:
+                #     self._retainer_listings_list.append(listings)
+                #     self.retainer_listings_changed.emit()
+                # self._retainer_listings_list_mutex.unlock()
             if not self.running:
                 break
 
     def service_requests(self):
         if self.refresh_recipe_request_sem.tryAcquire():
             self.refresh_listings(self.processed_recipe_list)
-            self.table_refresh_signal.emit()
+            self.print_status("Updating table...")
+            self.update_table(self.processed_recipe_list)
+
+    def update_table(self, recipe_list: List[Recipe]) -> None:
+        self._table_row_data_mutex.lock()
+        self._table_row_data.clear()
+        for recipe in recipe_list:
+            self._table_row_data.append(
+                (
+                    recipe.ClassJob.Abbreviation,
+                    recipe.ItemResult.Name,
+                    get_profit(recipe, self.world),
+                    get_listings(recipe.ItemResult.ID, self.world).regularSaleVelocity,
+                    recipe,
+                )
+            )
+        self._table_row_data.sort(key=lambda row: row[2] * row[3], reverse=True)
+        self._table_row_data_mutex.unlock()
+        self.table_refresh_signal.emit()
 
     def run(self):
         self.print_status("Getting DOH Classjob list")
@@ -108,14 +152,14 @@ class Worker(QObject):
             self.refresh_listings(self._processed_recipe_list)
             self._processed_recipe_list_mutex.lock()
             self._processed_recipe_list.extend(self.process_todo_recipe_list)
+            self.update_table(self._processed_recipe_list)
             self._processed_recipe_list_mutex.unlock()
-            self.table_refresh_signal.emit()
             self.process_todo_recipe_list.clear()
         self.print_status("Done")
         # TODO: Loop through listings to keep them fresh
         # QtCore.QThread.sleep(...)
-        while downloading_recipes and self.running:
-            self.refresh_listings(self.process_todo_recipe_list)
+        while self.running:
+            self.refresh_listings(self._processed_recipe_list)
             sleep_ctr = 30
             while sleep_ctr > 0:
                 QThread.sleep(1)
