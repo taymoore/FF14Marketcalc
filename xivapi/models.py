@@ -55,6 +55,11 @@ class Item(BaseModel):
         frozen = True
 
 
+# class ItemCollection(BaseCollectionModel[Item]):
+#     class Config:
+#         validate_assignment_strict = False
+
+
 class RecipeLevelTable(BaseModel):
     ClassJobLevel: int
 

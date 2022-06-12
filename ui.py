@@ -1,4 +1,6 @@
-from typing import List, Tuple
+import signal
+from typing import List, Optional, Tuple
+from pydantic import BaseModel
 import pyperclip
 from PySide6.QtCore import Slot, Signal, QSize, QThread, QSemaphore, Qt
 from PySide6.QtWidgets import (
@@ -18,11 +20,12 @@ from PySide6.QtWidgets import (
     QPushButton,
 )
 from ff14marketcalc import get_profit, print_recipe
+from retainerWorker.models import RowData
 from worker import Worker
 from retainerWorker.retainerWorker import RetainerWorker
 from universalis.universalis import get_listings
 from xivapi.models import Recipe, RecipeCollection
-from xivapi.xivapi import get_classjob_doh_list, search_recipes
+from xivapi.xivapi import get_classjob_doh_list, get_recipes, search_recipes
 
 world = 55
 
@@ -50,9 +53,11 @@ class MainWindow(QMainWindow):
 
         def add_recipes(
             self,
-            row_data: List[Tuple[str, str, float, float, Recipe]] = [],
+            row_data: Optional[List[Tuple[str, str, float, float, Recipe]]] = None,
             recipe_list: List[Recipe] = [],
         ):
+            if row_data is None:
+                row_data = []
             # TODO: Pass this recipe_list to the worker
             if len(recipe_list) > 0:
                 for recipe in recipe_list:
@@ -95,14 +100,17 @@ class MainWindow(QMainWindow):
 
             self.setEditTriggers(QAbstractItemView.NoEditTriggers)
 
-            self.table_data: List[
-                int, str, str, int, int
-            ] = []  # row, retainer, item, listed_price, min_price
+            # self.table_data: TableData = TableData()
 
         def clear_contents(self) -> None:
             self.clearContents()
             self.setRowCount(0)
-            self.table_data.clear()
+            # self.table_data.row_list.clear()
+
+        @Slot(list)
+        def on_table_data_changed(self, row_data: List[RowData]) -> None:
+            print("Table Data!")
+            print(str(row_data))
 
     def __init__(self):
         super().__init__()
@@ -157,20 +165,23 @@ class MainWindow(QMainWindow):
         # classjob_list = get_classjob_doh_list()
 
         # https://realpython.com/python-pyqt-qthread/
+        self.seller_id = (
+            "4d9521317c92e33772cd74a166c72b0207ab9edc5eaaed5a1edb52983b70b2c2"
+        )
         self.worker_thread = QThread(self)
         self.worker = Worker(
             classjob_level_max_dict={
-                8: 69,
+                8: 70,
                 9: 70,
-                10: 68,
-                11: 74,
-                12: 67,
-                13: 70,
-                14: 68,
-                15: 63,
+                10: 69,
+                11: 77,
+                12: 69,
+                13: 71,
+                14: 69,
+                15: 65,
             },
             world=world,
-            seller_id="4d9521317c92e33772cd74a166c72b0207ab9edc5eaaed5a1edb52983b70b2c2",
+            seller_id=self.seller_id,
         )
         self.worker_queue_recipe_list: List[
             Recipe
@@ -183,9 +194,15 @@ class MainWindow(QMainWindow):
         self.worker_thread.start()
 
         self.retainerworker_thread = QThread()
-        self.retainerworker = RetainerWorker()
+        self.retainerworker = RetainerWorker(seller_id=self.seller_id)
         self.retainerworker.moveToThread(self.retainerworker_thread)
-        # self.retainerworker_thread.started.connect(self.retainerworker.run)
+        self.retainerworker_thread.started.connect(self.retainerworker.run)
+        self.worker.retainer_listings_changed.connect(
+            self.retainerworker.on_retainer_listing_updated
+        )
+        self.retainerworker.table_data_changed.connect(
+            self.retainer_table.on_table_data_changed
+        )
         self.retainerworker_thread.finished.connect(self.worker.deleteLater)
         self.retainerworker_thread.start()
 
@@ -226,8 +243,9 @@ class MainWindow(QMainWindow):
         self.worker.universalis_mutex.unlock()
 
     def closeEvent(self, event):
+        get_recipes(8, 70)
         self.worker.stop()
-        # self.retainerworker.stop()
+        self.retainerworker.stop()
         self.status_bar_label.setText("Exiting...")
         self.worker_thread.quit()
         self.worker_thread.wait()

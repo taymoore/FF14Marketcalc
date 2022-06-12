@@ -38,16 +38,33 @@ def persist_to_file(file_name: str, timeout_s: float, return_type: BaseCollectio
     def save_to_disk(
         cache: Dict[Any, Tuple[Any, float]], file_name: str, return_type: BaseModel
     ):
-        new_cache: Dict[Any, Tuple[str, float]] = {
-            param: (
-                value[0].json()
-                if isinstance(value[0], BaseModel)
-                else return_type.parse_obj(value[0]).json(),
-                value[1],
-            )
-            for param, value in cache.items()
-        }
-        json.dump(new_cache, open(f".data/{file_name}", "w"))
+        print(file_name)
+        try:
+            new_cache: Dict[Any, Tuple[str, float]] = {}
+            for param, value in cache.items():
+                print(f"saving {str(param)}")
+                print(f"saving {str(value)}")
+                value_str = (
+                    value[0].json()
+                    if isinstance(value[0], BaseModel)
+                    else return_type.parse_obj(value[0]).json()
+                )
+                new_cache[param] = (value_str, value[1])
+            # new_cache: Dict[Any, Tuple[str, float]] = {
+            #     param: (
+            #         value[0].json()
+            #         if isinstance(value[0], BaseModel)
+            #         or isinstance(value[0], BaseCollectionModel)
+            #         else return_type.parse_obj(value[0]).json(),
+            #         value[1],
+            #     )
+            #     for param, value in cache.items()
+            # }
+            print("cache")
+            json.dump(new_cache, open(f".data/{file_name}", "w"))
+            print("dump")
+        except Exception as e:
+            print(str(e))
 
     atexit.register(partial(save_to_disk, cache, file_name, return_type))
 

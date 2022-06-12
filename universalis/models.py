@@ -9,6 +9,7 @@ class Listing(BaseModel):
     quantity: int
     hq: bool
     isCrafted: Optional[bool]
+    retainerName: Optional[str]
     sellerID: Optional[str]
     total: int
 

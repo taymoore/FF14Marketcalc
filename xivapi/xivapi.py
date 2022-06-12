@@ -20,6 +20,7 @@ from pydantic_collections import BaseCollectionModel
 from xivapi.models import (
     ClassJob,
     ClassJobCollection,
+    Item,
     Page,
     PageResult,
     Recipe,
@@ -53,6 +54,11 @@ def get_content(content_name: str, t: R):
     get_content_time = time.time()
     content_response.raise_for_status()
     return t.parse_obj(content_response.json())
+
+
+@persist_to_file("items.json", 3600 * 24 * 30, Item)
+def get_item(item_id: int) -> Item:
+    return get_content(f"Item/{item_id}", Item)
 
 
 @persist_to_file("classjob_doh.json", 3600 * 24 * 30, ClassJobCollection)
