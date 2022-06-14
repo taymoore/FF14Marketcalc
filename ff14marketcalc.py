@@ -13,6 +13,7 @@ from xivapi.xivapi import (
     search_recipes,
 )
 from universalis.universalis import get_listings
+from universalis.universalis import save_to_disk as universalis_save_to_disk
 
 _logger = logging.getLogger(__name__)
 
@@ -238,63 +239,72 @@ if __name__ == "__main__":
     # _logger.setLevel(logging.INFO)
     world = 55
 
-    # recipe_collection = search_recipies("Polished Slate Grinding Wheel")
-    # recipe: Recipe
-    # for recipe in recipe_collection:
-    #     print_recipe(recipe, 55)
+    print("getting recipe")
+    get_listings(1294, 55)
+    print("2")
+    get_listings(1294, 55)
+    print("3")
+    get_listings(1294, 55)
+    universalis_save_to_disk()
 
-    # print(get_classjob_doh_list())
-    player_class_list: List[Tuple[int, int]] = [
-        (8, 67),  # CRP
-        (9, 67),  # BSM
-        (10, 70),  # ARM
-        (11, 70),  # GSM
-        (12, 20),  # LTW
-        # (13, 70),  # WVR
-        # (14, 70),  # ALC
-        # (15, 70),  # CUL
-    ]
 
-    recipes: List[Recipe] = []
-    for classjob_id, classjob_level in player_class_list:
-        recipes.extend(
-            get_recipes_up_to_level(
-                classjob_id=classjob_id, classjob_level_max=classjob_level
-            )
-        )
-    recipe_profit_list: List[
-        Tuple[float, Listings, Recipe]
-    ] = []  # profit, velocity, recipe
-    recipe: Recipe
-    for recipe in recipes:
-        profit = get_profit(recipe, world)
-        if profit != 0:
-            recipe_profit_list.append(
-                (
-                    profit,
-                    get_listings(recipe.ItemResult.ID, world).regularSaleVelocity,
-                    recipe,
-                )
-            )
-    recipe_profit_list.sort(key=lambda recipe_tuple: recipe_tuple[0] * recipe_tuple[1])
-    for recipe_tuple in recipe_profit_list:
-        print(
-            f"{recipe_tuple[2].ClassJob.Abbreviation}: {recipe_tuple[2].ItemResult.Name}: {recipe_tuple[0]:,.0f} at velocity {recipe_tuple[1]:.2f}. Score {recipe_tuple[0] * recipe_tuple[1]:,.0f}"
-        )
-    print()
-    print(print_recipe(recipe_profit_list[-1][2], world))
+    # # recipe_collection = search_recipies("Polished Slate Grinding Wheel")
+    # # recipe: Recipe
+    # # for recipe in recipe_collection:
+    # #     print_recipe(recipe, 55)
 
-    # recipes = get_recipes_up_to_level(classjob_id=8, classjob_level_max=3)
-    # recipe_profit_list: List[Tuple[int, Recipe]] = []
+    # # print(get_classjob_doh_list())
+    # player_class_list: List[Tuple[int, int]] = [
+    #     (8, 67),  # CRP
+    #     (9, 67),  # BSM
+    #     (10, 70),  # ARM
+    #     (11, 70),  # GSM
+    #     (12, 20),  # LTW
+    #     # (13, 70),  # WVR
+    #     # (14, 70),  # ALC
+    #     # (15, 70),  # CUL
+    # ]
+
+    # recipes: List[Recipe] = []
+    # for classjob_id, classjob_level in player_class_list:
+    #     recipes.extend(
+    #         get_recipes_up_to_level(
+    #             classjob_id=classjob_id, classjob_level_max=classjob_level
+    #         )
+    #     )
+    # recipe_profit_list: List[
+    #     Tuple[float, Listings, Recipe]
+    # ] = []  # profit, velocity, recipe
     # recipe: Recipe
     # for recipe in recipes:
     #     profit = get_profit(recipe, world)
     #     if profit != 0:
-    #         recipe_profit_list.append((profit, recipe))
-    # recipe_profit_list.sort(key=lambda recipe_tuple: recipe_tuple[0])
+    #         recipe_profit_list.append(
+    #             (
+    #                 profit,
+    #                 get_listings(recipe.ItemResult.ID, world).regularSaleVelocity,
+    #                 recipe,
+    #             )
+    #         )
+    # recipe_profit_list.sort(key=lambda recipe_tuple: recipe_tuple[0] * recipe_tuple[1])
     # for recipe_tuple in recipe_profit_list:
-    #     print(f"{recipe_tuple[1].ItemResult.Name}: {recipe_tuple[0]}")
+    #     print(
+    #         f"{recipe_tuple[2].ClassJob.Abbreviation}: {recipe_tuple[2].ItemResult.Name}: {recipe_tuple[0]:,.0f} at velocity {recipe_tuple[1]:.2f}. Score {recipe_tuple[0] * recipe_tuple[1]:,.0f}"
+    #     )
     # print()
-    # print_recipe(recipe_profit_list[-1][1], world)
-    # # # print(get_listings(recipes[0].ItemResult.ID, 55))
-    # # # print(recipes)
+    # print(print_recipe(recipe_profit_list[-1][2], world))
+
+    # # recipes = get_recipes_up_to_level(classjob_id=8, classjob_level_max=3)
+    # # recipe_profit_list: List[Tuple[int, Recipe]] = []
+    # # recipe: Recipe
+    # # for recipe in recipes:
+    # #     profit = get_profit(recipe, world)
+    # #     if profit != 0:
+    # #         recipe_profit_list.append((profit, recipe))
+    # # recipe_profit_list.sort(key=lambda recipe_tuple: recipe_tuple[0])
+    # # for recipe_tuple in recipe_profit_list:
+    # #     print(f"{recipe_tuple[1].ItemResult.Name}: {recipe_tuple[0]}")
+    # # print()
+    # # print_recipe(recipe_profit_list[-1][1], world)
+    # # # # print(get_listings(recipes[0].ItemResult.ID, 55))
+    # # # # print(recipes)

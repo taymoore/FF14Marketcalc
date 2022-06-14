@@ -2,17 +2,18 @@ from typing import Dict, List, Optional, Tuple
 from copy import copy
 from PySide6.QtCore import Slot, Signal, QSize, QObject, QMutex, QSemaphore, QThread
 from ff14marketcalc import get_profit
-from universalis.universalis import get_listings
+from universalis.universalis import get_listings, universalis_mutex
 
 from xivapi.models import ClassJob, Recipe, RecipeCollection
 from universalis.models import Listing, Listings
-from xivapi.xivapi import get_classjob_doh_list, get_recipes
+from xivapi.xivapi import get_classjob_doh_list, get_recipes, xivapi_mutex
 
 
 class Worker(QObject):
     status_bar_update_signal = Signal(str)
     table_refresh_signal = Signal()
-    retainer_listings_changed = Signal(Listings)
+    # retainer_listings_changed = Signal(Listings)
+    retainer_listings_changed = Signal()
     refresh_recipe_request_sem = QSemaphore()
 
     def __init__(
@@ -26,8 +27,6 @@ class Worker(QObject):
         self.process_todo_recipe_list: RecipeCollection = RecipeCollection()
         self._processed_recipe_list: RecipeCollection = RecipeCollection()
         self._processed_recipe_list_mutex = QMutex()
-        self.xivapi_mutex = QMutex()
-        self.universalis_mutex = QMutex()
         self._table_row_data: List[Tuple[str, str, float, float, Recipe]] = []
         self._table_row_data_mutex = QMutex()
         # self._retainer_listings_list: List[Listings] = []
@@ -61,11 +60,13 @@ class Worker(QObject):
             self.print_status(
                 f"Refreshing marketboard data {recipe_index+1}/{len(recipe_list)} ({recipe.ItemResult.Name})..."
             )
-            self.universalis_mutex.lock()
+            universalis_mutex.lock()
             listings = get_listings(recipe.ItemResult.ID, self.world)
-            self.universalis_mutex.unlock()
+            universalis_mutex.unlock()
             if any(listing.sellerID == self.seller_id for listing in listings.listings):
-                self.retainer_listings_changed.emit(listings)
+                print("emitting")
+                # self.retainer_listings_changed.emit(listings)
+                self.retainer_listings_changed.emit()
                 # self._retainer_listings_list_mutex.lock()
                 # if listings not in self._retainer_listings_list:
                 #     self._retainer_listings_list.append(listings)
@@ -77,10 +78,10 @@ class Worker(QObject):
     def service_requests(self):
         if self.refresh_recipe_request_sem.tryAcquire():
             self.refresh_listings(self.processed_recipe_list)
-            self.print_status("Updating table...")
             self.update_table(self.processed_recipe_list)
 
     def update_table(self, recipe_list: List[Recipe]) -> None:
+        self.print_status("Updating table...")
         self._table_row_data_mutex.lock()
         self._table_row_data.clear()
         for recipe in recipe_list:
@@ -118,13 +119,13 @@ class Worker(QObject):
                     self.print_status(
                         f"Getting recipes for class {classjob.Abbreviation} level {classjob_level}..."
                     )
-                    self.xivapi_mutex.lock()
+                    xivapi_mutex.lock()
                     self.process_todo_recipe_list.extend(
                         get_recipes(
                             classjob_id=classjob_id, classjob_level=classjob_level
                         )
                     )
-                    self.xivapi_mutex.unlock()
+                    xivapi_mutex.unlock()
                     self.classjob_level_current_dict[classjob_id] -= 1
                     downloading_recipes = True
                 if not self.running:
@@ -137,11 +138,14 @@ class Worker(QObject):
             recipe: Recipe
             for recipe in self.process_todo_recipe_list:
                 self.print_status(
+                    f"Worker waiting for universalis mutex"
+                )
+                universalis_mutex.lock()
+                self.print_status(
                     f"Getting recipe marketboard data for {recipe.ItemResult.Name}..."
                 )
-                self.universalis_mutex.lock()
                 get_profit(recipe, self.world)
-                self.universalis_mutex.unlock()
+                universalis_mutex.unlock()
                 if not self.running:
                     downloading_recipes = False
                     break

@@ -24,7 +24,7 @@ class RetainerWorker(QObject):
 
     def run(self) -> None:
         while self.running:
-            pass
+            QThread.sleep(1)
 
     def stop(self) -> None:
         self.running = False
@@ -42,11 +42,15 @@ class RetainerWorker(QObject):
                 )
         return row_data
 
-    @Slot(Listings)
-    def on_retainer_listing_updated(self, listings: Listings) -> None:
-        if not any(row_data.listings == listings for row_data in self.table_data):
-            row_data = self.build_row_data(listings)
-            self.table_data.extend(row_data)
-            self.table_data_changed.emit(self.table_data)
-        # if listings not in self.retainer_listings_list:
-        #     self.retainer_listings_list.append(listings)
+    # @Slot(Listings)
+    # def on_retainer_listings_changed(self, listings: Listings) -> None:
+    @Slot()
+    def on_retainer_listings_changed(self) -> None:
+        print("received")
+        # if not any(row_data.listings == listings for row_data in self.table_data):
+        #     row_data = self.build_row_data(listings)
+        #     self.table_data.extend(row_data)
+        #     print("emit!")
+        #     self.table_data_changed.emit(self.table_data)
+        # # if listings not in self.retainer_listings_list:
+        # #     self.retainer_listings_list.append(listings)

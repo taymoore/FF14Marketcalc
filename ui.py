@@ -23,9 +23,11 @@ from ff14marketcalc import get_profit, print_recipe
 from retainerWorker.models import RowData
 from worker import Worker
 from retainerWorker.retainerWorker import RetainerWorker
-from universalis.universalis import get_listings
+from universalis.universalis import get_listings, universalis_mutex
+from universalis.universalis import save_to_disk as universalis_save_to_disk
 from xivapi.models import Recipe, RecipeCollection
-from xivapi.xivapi import get_classjob_doh_list, get_recipes, search_recipes
+from xivapi.xivapi import get_classjob_doh_list, get_recipes, search_recipes, xivapi_mutex
+from xivapi.xivapi import save_to_disk as xivapi_save_to_disk
 
 world = 55
 
@@ -49,7 +51,6 @@ class MainWindow(QMainWindow):
             self.clearContents()
             self.setRowCount(0)
             self.recipe_list.clear()
-            print("clear recipe list")
 
         def add_recipes(
             self,
@@ -187,44 +188,47 @@ class MainWindow(QMainWindow):
             Recipe
         ] = []  # Respective mutex is self.queue_worker_task
         self.worker.moveToThread(self.worker_thread)
-        self.worker_thread.started.connect(self.worker.run)
-        self.worker_thread.finished.connect(self.worker.deleteLater)
-        self.worker.status_bar_update_signal.connect(self.status_bar_label.setText)
-        self.worker.table_refresh_signal.connect(self.on_worker_update)
-        self.worker_thread.start()
 
         self.retainerworker_thread = QThread()
         self.retainerworker = RetainerWorker(seller_id=self.seller_id)
         self.retainerworker.moveToThread(self.retainerworker_thread)
-        self.retainerworker_thread.started.connect(self.retainerworker.run)
+
+        self.worker.status_bar_update_signal.connect(self.status_bar_label.setText)
+        self.worker.table_refresh_signal.connect(self.on_worker_update)
+
         self.worker.retainer_listings_changed.connect(
-            self.retainerworker.on_retainer_listing_updated
+            self.retainerworker.on_retainer_listings_changed
         )
         self.retainerworker.table_data_changed.connect(
             self.retainer_table.on_table_data_changed
         )
-        self.retainerworker_thread.finished.connect(self.worker.deleteLater)
+        self.worker_thread.started.connect(self.worker.run)
+        self.worker_thread.finished.connect(self.worker.deleteLater)
+        self.retainerworker_thread.started.connect(self.retainerworker.run)
+        self.retainerworker_thread.finished.connect(self.retainerworker.deleteLater)
+
+        self.worker_thread.start()
         self.retainerworker_thread.start()
 
     @Slot()
     def on_search_return_pressed(self):
         self.refreshing_table = False
-        self.worker.xivapi_mutex.lock()
+        xivapi_mutex.lock()
         recipes = search_recipes(self.search_qlineedit.text())
-        self.worker.xivapi_mutex.unlock()
+        xivapi_mutex.unlock()
         self.table.clear_contents()
-        self.worker.universalis_mutex.lock()
+        universalis_mutex.lock()
         self.table.add_recipes(recipe_list=recipes)
-        self.worker.universalis_mutex.unlock()
+        universalis_mutex.unlock()
 
     @Slot(int, int)
     def on_table_double_clicked(self, row: int, column: int):
         item_name = self.table.recipe_list[row].ItemResult.Name
         pyperclip.copy(item_name)
         self.status_bar_label.setText(f"Processing {item_name}...")
-        self.worker.universalis_mutex.lock()
+        universalis_mutex.lock()
         self.recipe_textedit.setText(print_recipe(self.table.recipe_list[row], world))
-        self.worker.universalis_mutex.unlock()
+        universalis_mutex.unlock()
 
     @Slot()
     def on_refresh_button_clicked(self):
@@ -238,17 +242,20 @@ class MainWindow(QMainWindow):
 
     def refresh_table(self):
         self.table.clear_contents()
-        self.worker.universalis_mutex.lock()
+        universalis_mutex.lock()
         self.table.add_recipes(self.worker.table_row_data)
-        self.worker.universalis_mutex.unlock()
+        universalis_mutex.unlock()
 
     def closeEvent(self, event):
-        get_recipes(8, 70)
         self.worker.stop()
         self.retainerworker.stop()
         self.status_bar_label.setText("Exiting...")
         self.worker_thread.quit()
         self.worker_thread.wait()
+        self.retainerworker_thread.quit()
+        self.retainerworker_thread.wait()
+        universalis_save_to_disk()
+        xivapi_save_to_disk()
         super().closeEvent(event)
 
 
