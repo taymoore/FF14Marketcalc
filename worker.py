@@ -12,8 +12,7 @@ from xivapi.xivapi import get_classjob_doh_list, get_recipes, xivapi_mutex
 class Worker(QObject):
     status_bar_update_signal = Signal(str)
     table_refresh_signal = Signal()
-    # retainer_listings_changed = Signal(Listings)
-    retainer_listings_changed = Signal()
+    retainer_listings_changed = Signal(Listings)
     refresh_recipe_request_sem = QSemaphore()
 
     def __init__(
@@ -64,9 +63,7 @@ class Worker(QObject):
             listings = get_listings(recipe.ItemResult.ID, self.world)
             universalis_mutex.unlock()
             if any(listing.sellerID == self.seller_id for listing in listings.listings):
-                print("emitting")
-                # self.retainer_listings_changed.emit(listings)
-                self.retainer_listings_changed.emit()
+                self.retainer_listings_changed.emit(listings)
                 # self._retainer_listings_list_mutex.lock()
                 # if listings not in self._retainer_listings_list:
                 #     self._retainer_listings_list.append(listings)
@@ -137,9 +134,7 @@ class Worker(QObject):
                 break
             recipe: Recipe
             for recipe in self.process_todo_recipe_list:
-                self.print_status(
-                    f"Worker waiting for universalis mutex"
-                )
+                self.print_status(f"Worker waiting for universalis mutex")
                 universalis_mutex.lock()
                 self.print_status(
                     f"Getting recipe marketboard data for {recipe.ItemResult.Name}..."

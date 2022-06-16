@@ -15,9 +15,8 @@ get_content_time = time.time() - GET_CONTENT_RATE
 
 universalis_mutex = QMutex()
 
-def _get_listings(
-    id: int, world: Union[int, str]
-) -> Listings:
+
+def _get_listings(id: int, world: Union[int, str]) -> Listings:
     url = f"https://universalis.app/api/v2/{world}/{id}"
     global get_content_time
     now_time = time.time()
@@ -32,7 +31,9 @@ def _get_listings(
     content_response.raise_for_status()
     return Listings.parse_obj(content_response.json())
 
-get_listings = Persist(_get_listings, "temp.json", 3600 * 2 * 24, Listings)
+
+get_listings = Persist(_get_listings, "listings.json", 3600 * 2 * 24, Listings)
+
 
 def save_to_disk() -> None:
     get_listings.save_to_disk()

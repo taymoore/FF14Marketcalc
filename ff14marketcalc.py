@@ -1,5 +1,4 @@
 import enum
-from functools import cache
 import logging
 from typing import Callable, Any, Dict, Iterable, Mapping, Optional, Tuple, List, Union
 
@@ -246,7 +245,6 @@ if __name__ == "__main__":
     print("3")
     get_listings(1294, 55)
     universalis_save_to_disk()
-
 
     # # recipe_collection = search_recipies("Polished Slate Grinding Wheel")
     # # recipe: Recipe

@@ -1,4 +1,4 @@
-from functools import cache, partial, wraps
+from functools import partial, wraps
 from typing import (
     Any,
     Callable,
@@ -21,9 +21,16 @@ from pydantic_collections import BaseCollectionModel
 _logger = logging.getLogger(__name__)
 
 
-class Persist():
+class Persist:
     func: Callable
-    def __init__(self, func: Callable, filename: str, cache_timeout_s: float, return_type: Union[BaseCollectionModel, BaseModel])  -> None:
+
+    def __init__(
+        self,
+        func: Callable,
+        filename: str,
+        cache_timeout_s: float,
+        return_type: Union[BaseCollectionModel, BaseModel],
+    ) -> None:
         self.timeout_s = cache_timeout_s
         self.func = func
         self.filename = filename
@@ -33,7 +40,9 @@ class Persist():
                     return_type.parse_raw(value[0]),
                     value[1],
                 )
-                for param, value in json.load(open(f".data/{self.filename}", "r")).items()
+                for param, value in json.load(
+                    open(f".data/{self.filename}", "r")
+                ).items()
             }
         except (IOError, ValueError):
             _logger.log(logging.WARN, f"Error loading {self.filename} cache")
@@ -55,8 +64,12 @@ class Persist():
         except Exception as e:
             print(str(e))
 
-    def __call__(self, *args: Any, cache_timeout_s: Optional[float] = None, **kwargs: Any) -> Any:
-        _cache_timeout_s = cache_timeout_s if cache_timeout_s is not None else self.timeout_s
+    def __call__(
+        self, *args: Any, cache_timeout_s: Optional[float] = None, **kwargs: Any
+    ) -> Any:
+        _cache_timeout_s = (
+            cache_timeout_s if cache_timeout_s is not None else self.timeout_s
+        )
         if args is None:
             _args: Union[List[Any], str] = []
         else:
@@ -70,7 +83,10 @@ class Persist():
                     logging.DEBUG,
                     f"Age of {self.filename} Cache: {time.time() - self.cache['null'][1]}s",
                 )
-            if len(self.cache) == 0 or time.time() - self.cache["null"][1] > _cache_timeout_s:
+            if (
+                len(self.cache) == 0
+                or time.time() - self.cache["null"][1] > _cache_timeout_s
+            ):
                 self.cache["null"] = (self.func(), time.time())
             _args = "null"
         else:
@@ -86,6 +102,7 @@ class Persist():
                 self.cache[str(_args)] = (self.func(*_args), time.time())
 
         return self.cache[str(_args)][0]
+
 
 def persist_to_file(file_name: str, timeout_s: float, return_type: BaseCollectionModel):
 

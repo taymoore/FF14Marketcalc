@@ -1,8 +1,9 @@
 import signal
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 from pydantic import BaseModel
 import pyperclip
-from PySide6.QtCore import Slot, Signal, QSize, QThread, QSemaphore, Qt
+from PySide6.QtCore import Slot, Signal, QSize, QThread, QSemaphore, Qt, QBasicTimer
+from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QApplication,
     QWidget,
@@ -20,16 +21,21 @@ from PySide6.QtWidgets import (
     QPushButton,
 )
 from ff14marketcalc import get_profit, print_recipe
-from retainerWorker.models import RowData
+from retainerWorker.models import ListingData
 from worker import Worker
 from retainerWorker.retainerWorker import RetainerWorker
 from universalis.universalis import get_listings, universalis_mutex
 from universalis.universalis import save_to_disk as universalis_save_to_disk
 from xivapi.models import Recipe, RecipeCollection
-from xivapi.xivapi import get_classjob_doh_list, get_recipes, search_recipes, xivapi_mutex
+from xivapi.xivapi import (
+    get_classjob_doh_list,
+    get_recipes,
+    search_recipes,
+    xivapi_mutex,
+)
 from xivapi.xivapi import save_to_disk as xivapi_save_to_disk
 
-world = 55
+world_id = 55
 
 
 class MainWindow(QMainWindow):
@@ -66,9 +72,9 @@ class MainWindow(QMainWindow):
                         (
                             recipe.ClassJob.Abbreviation,
                             recipe.ItemResult.Name,
-                            get_profit(recipe, world),
+                            get_profit(recipe, world_id),
                             get_listings(
-                                recipe.ItemResult.ID, world
+                                recipe.ItemResult.ID, world_id
                             ).regularSaleVelocity,
                             recipe,
                         )
@@ -90,28 +96,54 @@ class MainWindow(QMainWindow):
         queue_worker_task = Signal()
 
     class RetainerTable(QTableWidget):
-        def __init__(self, *args):
-            super().__init__(*args)
+        def __init__(self, parent: QWidget, seller_id: int):
+            super().__init__(parent)
             self.setColumnCount(4)
             self.setHorizontalHeaderLabels(
                 ["Retainer", "Item", "Listed Price", "Min Price"]
             )
             self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
             self.verticalHeader().hide()
-
             self.setEditTriggers(QAbstractItemView.NoEditTriggers)
-
-            # self.table_data: TableData = TableData()
+            self.seller_id = seller_id
+            self.table_data: Dict[int, List[List[QTableWidgetItem]]] = {}
+            self.good_color = QColor(0, 255, 0, 50)
+            self.bad_color = QColor(255, 0, 0, 50)
 
         def clear_contents(self) -> None:
             self.clearContents()
             self.setRowCount(0)
-            # self.table_data.row_list.clear()
+            self.table_data.clear()
 
         @Slot(list)
-        def on_table_data_changed(self, row_data: List[RowData]) -> None:
-            print("Table Data!")
-            print(str(row_data))
+        def on_listing_data_updated(self, listing_data: ListingData) -> None:
+            row_list_index = 0
+            row_list = self.table_data.setdefault(listing_data.item.ID, [])
+            for listing in listing_data.listings.listings:
+                if listing.sellerID == self.seller_id:
+                    if row_list_index < len(row_list):
+                        row_data = row_list[row_list_index]
+                        row_data[2].setText(f"{listing.pricePerUnit:,.0f}")
+                        row_data[3].setText(f"{listing_data.listings.minPrice:,.0f}")
+                    else:
+                        row_data = [
+                            QTableWidgetItem(listing.retainerName),
+                            QTableWidgetItem(listing_data.item.Name),
+                            QTableWidgetItem(f"{listing.pricePerUnit:,.0f}"),
+                            QTableWidgetItem(f"{listing_data.listings.minPrice:,.0f}"),
+                        ]
+                        row_count = self.rowCount()
+                        self.insertRow(row_count)
+                        for column_index, widget in enumerate(row_data):
+                            self.setItem(row_count, column_index, widget)
+                        row_list.append(row_data)
+                    if listing.pricePerUnit <= listing_data.listings.minPrice:
+                        color = self.good_color
+                    else:
+                        color = self.bad_color
+                    for table_widget_item in row_data:
+                        table_widget_item.setBackground(color)
+                    row_list_index += 1
 
     def __init__(self):
         super().__init__()
@@ -150,8 +182,12 @@ class MainWindow(QMainWindow):
         self.recipe_textedit = QTextEdit(self)
         self.left_splitter.addWidget(self.recipe_textedit)
 
+        self.seller_id = (
+            "4d9521317c92e33772cd74a166c72b0207ab9edc5eaaed5a1edb52983b70b2c2"
+        )
+
         self.centre_splitter.addWidget(self.left_splitter)
-        self.retainer_table = MainWindow.RetainerTable(self)
+        self.retainer_table = MainWindow.RetainerTable(self, self.seller_id)
         self.centre_splitter.addWidget(self.retainer_table)
 
         self.main_layout.addWidget(self.centre_splitter)
@@ -161,14 +197,11 @@ class MainWindow(QMainWindow):
         self.status_bar_label = QLabel()
         self.statusBar().addPermanentWidget(self.status_bar_label, 1)
 
-        self.setMinimumSize(QSize(600, 600))
+        self.setMinimumSize(QSize(800, 600))
 
         # classjob_list = get_classjob_doh_list()
 
         # https://realpython.com/python-pyqt-qthread/
-        self.seller_id = (
-            "4d9521317c92e33772cd74a166c72b0207ab9edc5eaaed5a1edb52983b70b2c2"
-        )
         self.worker_thread = QThread(self)
         self.worker = Worker(
             classjob_level_max_dict={
@@ -181,31 +214,33 @@ class MainWindow(QMainWindow):
                 14: 69,
                 15: 65,
             },
-            world=world,
+            world=world_id,
             seller_id=self.seller_id,
         )
+        self.worker.moveToThread(self.worker_thread)
+        self.worker_thread.started.connect(self.worker.run)
+        self.worker_thread.finished.connect(self.worker.deleteLater)
         self.worker_queue_recipe_list: List[
             Recipe
         ] = []  # Respective mutex is self.queue_worker_task
-        self.worker.moveToThread(self.worker_thread)
-
-        self.retainerworker_thread = QThread()
-        self.retainerworker = RetainerWorker(seller_id=self.seller_id)
-        self.retainerworker.moveToThread(self.retainerworker_thread)
 
         self.worker.status_bar_update_signal.connect(self.status_bar_label.setText)
         self.worker.table_refresh_signal.connect(self.on_worker_update)
 
+        self.retainerworker_thread = QThread()
+        self.retainerworker = RetainerWorker(
+            seller_id=self.seller_id, world_id=world_id
+        )
+        self.retainerworker.moveToThread(self.retainerworker_thread)
+        # self.retainerworker_thread.started.connect(self.retainerworker.run)
+        self.retainerworker_thread.finished.connect(self.retainerworker.deleteLater)
+
         self.worker.retainer_listings_changed.connect(
             self.retainerworker.on_retainer_listings_changed
         )
-        self.retainerworker.table_data_changed.connect(
-            self.retainer_table.on_table_data_changed
+        self.retainerworker.listing_data_updated.connect(
+            self.retainer_table.on_listing_data_updated
         )
-        self.worker_thread.started.connect(self.worker.run)
-        self.worker_thread.finished.connect(self.worker.deleteLater)
-        self.retainerworker_thread.started.connect(self.retainerworker.run)
-        self.retainerworker_thread.finished.connect(self.retainerworker.deleteLater)
 
         self.worker_thread.start()
         self.retainerworker_thread.start()
@@ -227,7 +262,9 @@ class MainWindow(QMainWindow):
         pyperclip.copy(item_name)
         self.status_bar_label.setText(f"Processing {item_name}...")
         universalis_mutex.lock()
-        self.recipe_textedit.setText(print_recipe(self.table.recipe_list[row], world))
+        self.recipe_textedit.setText(
+            print_recipe(self.table.recipe_list[row], world_id)
+        )
         universalis_mutex.unlock()
 
     @Slot()

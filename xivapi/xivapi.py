@@ -1,4 +1,4 @@
-from functools import cache, partial
+from functools import partial
 import logging
 from typing import (
     Any,
@@ -38,6 +38,7 @@ xivapi_mutex = QMutex()
 
 R = TypeVar("R", bound=BaseModel)
 
+
 def get_content(content_name: str, t: R):
     _logger.log(logging.INFO, f"getting {content_name}")
     if content_name[0] == "/":
@@ -63,7 +64,9 @@ def get_content(content_name: str, t: R):
 def _get_item(item_id: int) -> Item:
     return get_content(f"Item/{item_id}", Item)
 
+
 get_item = Persist(_get_item, "items.json", 3600 * 24 * 30, Item)
+
 
 def _get_classjob_doh_list() -> List[ClassJob]:
     classjob_doh_list = []
@@ -74,7 +77,11 @@ def _get_classjob_doh_list() -> List[ClassJob]:
                 classjob_doh_list.append(classjob_info)
     return classjob_doh_list
 
-get_classjob_doh_list = Persist(_get_classjob_doh_list, "classjob_doh.json", 3600 * 24 * 30, ClassJobCollection)
+
+get_classjob_doh_list = Persist(
+    _get_classjob_doh_list, "classjob_doh.json", 3600 * 24 * 30, ClassJobCollection
+)
+
 
 def get_content_pages(content_name: str) -> Generator[List[PageResult], None, None]:
     first_page: Page = get_content(content_name, Page)
@@ -87,7 +94,9 @@ def get_content_pages(content_name: str) -> Generator[List[PageResult], None, No
 def _get_recipe(url) -> Recipe:
     return get_content(url, Recipe)
 
+
 get_recipe = Persist(_get_recipe, "recipes.json", 3600 * 24 * 30, Recipe)
+
 
 def _get_recipes(classjob_id: int, classjob_level: int) -> RecipeCollection:
     recipe_collection = RecipeCollection()
@@ -98,7 +107,11 @@ def _get_recipes(classjob_id: int, classjob_level: int) -> RecipeCollection:
             recipe_collection.append(get_recipe(recipe_result.Url))
     return recipe_collection
 
-get_recipes = Persist(_get_recipes, "recipe_collection.json", 3600 * 24 * 30, RecipeCollection)
+
+get_recipes = Persist(
+    _get_recipes, "recipe_collection.json", 3600 * 24 * 30, RecipeCollection
+)
+
 
 def get_recipes_up_to_level(
     classjob_id: int, classjob_level_max: int
@@ -119,6 +132,7 @@ def search_recipes(search_string: str) -> RecipeCollection:
             if recipe_result.UrlType == "Recipe":
                 recipe_collection.append(get_recipe(recipe_result.Url))
     return recipe_collection
+
 
 def save_to_disk() -> None:
     get_item.save_to_disk()
