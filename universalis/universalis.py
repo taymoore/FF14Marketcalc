@@ -31,7 +31,8 @@ try:
     }
     for cache_tuple in cache.values():
         listings = cache_tuple[0]
-        listings.History = pd.read_json(listings.History)
+        listings.History = pd.read_json(listings.History, convert_axes=False)
+        listings.History.index = listings.History.index.astype("float64")
 except (IOError, ValueError):
     _logger.log(logging.WARN, f"Error loading {CACHE_FILENAME} cache")
     cache = {}
@@ -85,6 +86,7 @@ def get_listings(
         )
     if str(_args) not in cache or time.time() - cache[str(_args)][1] > _cache_timeout_s:
         listings = _get_listings(id, world)
+
         if str(_args) in cache:
             listings.History = cache[str(_args)][0].History
         else:
@@ -92,7 +94,14 @@ def get_listings(
         for recent_history_listing in listings.recentHistory:
             listings.History.loc[
                 recent_history_listing.timestamp
+                # pd.to_datetime(recent_history_listing.timestamp, unit="s")
             ] = recent_history_listing.pricePerUnit
+
+        # listing_history_period = (listings.History.index.max() - listings.History.index.min()) / len(listings.History.index)
+        listings.regularSaleVelocity = (3600 * 24 * 7 * len(listings.History.index)) / (
+            listings.History.index.max() - listings.History.index.min()
+        )
+
         cache[str(_args)] = (listings, time.time())
 
     return cache[str(_args)][0]

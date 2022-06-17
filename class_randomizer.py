@@ -7,9 +7,14 @@ from pydantic import BaseModel
 def class_randomizer(
     players_dict: Dict[str, List[Tuple[str, str]]] = {
         "Dan": [("", "dps"), ("", "tank"), ("", "healer")],
-        "Katie": [("", "tank")],  # , ("", "healer"), ("", "dps"),
+        "Katie": [
+            ("", "tank"),
+            # ("", "healer"),
+            ("", "dps"),
+        ],  #
         "Kai": [("", "dps"), ("", "tank"), ("", "healer")],
-        "Taylor": [("", "dps"), ("", "tank"), ("", "healer")],
+        # "Taylor": [("", "dps"), ("", "tank"), ("", "healer")],
+        "Helen": [("", "dps")],  # , ("", "tank"), ("", "healer")
         # "Dan": [("Blm", "dps"), ("Drk", "tank"), ("Rpr", "dps")],  # ("Whm", "healer"),
         # "Katie": [("Nnj", "dps"), ("War", "tank")],  # ("Rpr", "dps"),
         # # "Helen": [("Brd", "dps"), ("Whm", "healer")],

@@ -2,6 +2,7 @@ import json
 import signal
 from typing import Dict, List, Optional, Tuple
 from pydantic import BaseModel
+import matplotlib.dates
 import pyperclip
 from PySide6.QtCore import Slot, Signal, QSize, QThread, QSemaphore, Qt, QBasicTimer
 from PySide6.QtGui import QBrush, QColor
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QPushButton,
 )
+from pyqtgraph import PlotWidget, DateAxisItem
 from ff14marketcalc import get_profit, print_recipe
 from retainerWorker.models import ListingData
 from universalis.models import Listings
@@ -162,6 +164,12 @@ class MainWindow(QMainWindow):
                         table_widget_item.setBackground(color)
                     row_list_index += 1
 
+    class PriceGraph(PlotWidget):
+        def __init__(self, parent=None, background="default", plotItem=None, **kargs):
+            # axis = DateAxisItem()
+            # self.getPlotItem().setAxisItems({"bottom": axis})
+            super().__init__(parent, background, plotItem, **kargs)
+
     retainer_listings_changed = Signal(Listings)
 
     def __init__(self):
@@ -174,6 +182,10 @@ class MainWindow(QMainWindow):
         self.centre_splitter = QSplitter()
         self.left_splitter = QSplitter()
         self.left_splitter.setOrientation(Qt.Orientation.Vertical)
+        self.right_splitter = QSplitter()
+        self.right_splitter.setOrientation(Qt.Orientation.Vertical)
+        self.centre_splitter.addWidget(self.left_splitter)
+        self.centre_splitter.addWidget(self.right_splitter)
         self.table_search_layout = QVBoxLayout()
         self.table_search_layout.setContentsMargins(0, 0, 0, 0)
         self.table_search_widget = QWidget()
@@ -205,12 +217,17 @@ class MainWindow(QMainWindow):
             "4d9521317c92e33772cd74a166c72b0207ab9edc5eaaed5a1edb52983b70b2c2"
         )
 
-        self.centre_splitter.addWidget(self.left_splitter)
         self.retainer_table = MainWindow.RetainerTable(self, self.seller_id)
         self.retainer_table.cellDoubleClicked.connect(
             self.on_retainer_table_double_clicked
         )
-        self.centre_splitter.addWidget(self.retainer_table)
+        self.right_splitter.addWidget(self.retainer_table)
+
+        self.price_graph = MainWindow.PriceGraph(
+            self, axisItems={"bottom": DateAxisItem()}
+        )
+        # self.price_graph = MainWindow.PriceGraph()
+        self.right_splitter.addWidget(self.price_graph)
 
         self.main_layout.addWidget(self.centre_splitter)
         self.main_widget.setLayout(self.main_layout)
@@ -319,6 +336,10 @@ class MainWindow(QMainWindow):
             print_recipe(self.table.recipe_list[row], world_id)
         )
         universalis_mutex.unlock()
+
+        # self.price_graph.plot(listings.History.to_dict())
+        self.price_graph.clear()
+        self.price_graph.plot(listings.History.index, listings.History["Price"].values)
 
     @Slot()
     def on_refresh_button_clicked(self):
