@@ -1,3 +1,4 @@
+import json
 import signal
 from typing import Dict, List, Optional, Tuple
 from pydantic import BaseModel
@@ -22,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 from ff14marketcalc import get_profit, print_recipe
 from retainerWorker.models import ListingData
+from universalis.models import Listings
 from worker import Worker
 from retainerWorker.retainerWorker import RetainerWorker
 from universalis.universalis import get_listings, universalis_mutex
@@ -145,6 +147,8 @@ class MainWindow(QMainWindow):
                         table_widget_item.setBackground(color)
                     row_list_index += 1
 
+    retainer_listings_changed = Signal(Listings)
+
     def __init__(self):
         super().__init__()
 
@@ -208,11 +212,11 @@ class MainWindow(QMainWindow):
                 8: 70,
                 9: 70,
                 10: 69,
-                11: 77,
-                12: 69,
-                13: 71,
-                14: 69,
-                15: 65,
+                11: 78,
+                12: 70,
+                13: 73,
+                14: 70,
+                15: 67,
             },
             world=world_id,
             seller_id=self.seller_id,
@@ -235,6 +239,9 @@ class MainWindow(QMainWindow):
         # self.retainerworker_thread.started.connect(self.retainerworker.run)
         self.retainerworker_thread.finished.connect(self.retainerworker.deleteLater)
 
+        self.retainer_listings_changed.connect(
+            self.retainerworker.on_retainer_listings_changed
+        )
         self.worker.retainer_listings_changed.connect(
             self.retainerworker.on_retainer_listings_changed
         )
@@ -244,6 +251,18 @@ class MainWindow(QMainWindow):
 
         self.worker_thread.start()
         self.retainerworker_thread.start()
+        self.load_retainer_worker_cache()
+
+    def load_retainer_worker_cache(self) -> None:
+        try:
+            listings_list: List[Listings] = [
+                Listings.parse_raw(listings)
+                for listings in json.load(open(".data/retainer_worker_cache.json", "r"))
+            ]
+            for listings in listings_list:
+                self.retainer_listings_changed.emit(listings)
+        except:
+            pass
 
     @Slot()
     def on_search_return_pressed(self):
@@ -261,7 +280,14 @@ class MainWindow(QMainWindow):
         item_name = self.table.recipe_list[row].ItemResult.Name
         pyperclip.copy(item_name)
         self.status_bar_label.setText(f"Processing {item_name}...")
+
         universalis_mutex.lock()
+        listings: Listings = get_listings(
+            self.table.recipe_list[row].ItemResult.ID, world_id, cache_timeout_s=10
+        )
+        if any(listing.sellerID == self.seller_id for listing in listings.listings):
+            self.retainer_listings_changed.emit(listings)
+
         self.recipe_textedit.setText(
             print_recipe(self.table.recipe_list[row], world_id)
         )
@@ -285,7 +311,6 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         self.worker.stop()
-        self.retainerworker.stop()
         self.status_bar_label.setText("Exiting...")
         self.worker_thread.quit()
         self.worker_thread.wait()
@@ -293,6 +318,7 @@ class MainWindow(QMainWindow):
         self.retainerworker_thread.wait()
         universalis_save_to_disk()
         xivapi_save_to_disk()
+        self.retainerworker.save_cache()
         super().closeEvent(event)
 
 

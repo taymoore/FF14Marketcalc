@@ -32,7 +32,7 @@ def _get_listings(id: int, world: Union[int, str]) -> Listings:
     return Listings.parse_obj(content_response.json())
 
 
-get_listings = Persist(_get_listings, "listings.json", 3600 * 2 * 24, Listings)
+get_listings = Persist(_get_listings, "listings.json", 3600, Listings)
 
 
 def save_to_disk() -> None:

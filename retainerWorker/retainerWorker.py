@@ -1,3 +1,4 @@
+import json
 import logging
 from typing import Dict, List, Optional, Tuple
 from copy import copy
@@ -38,45 +39,11 @@ class RetainerWorker(QObject):
         self.running = True
         _logger.setLevel(logging.DEBUG)
 
-    def run(self) -> None:
-        while self.running:
-            QThread.sleep(1)
-
-    def stop(self) -> None:
-        self.running = False
-
-    # def update_listing_data(self, listing_data: ListingData):
-    #     listing_row_index = 0
-    #     for listing in listing_data.listings.listings:
-    #         if listing.sellerID == self.seller_id:
-    #             if listing_row_index < len(listing_data.row_data):
-    #                 row_data = listing_data.row_data[listing_row_index]
-    #                 row_data.listing = listing
-    #                 row_data.widget_list[2].setText(f"{listing.pricePerUnit:,.0f}")
-    #                 row_data.widget_list[3].setText(
-    #                     f"{listing_data.listings.minPrice:,.0f}"
-    #                 )
-    #             else:
-    #                 listing_data.row_data.append(
-    #                     row_data := RowData(
-    #                         listing=listing,
-    #                         widget_list=[
-    #                             QTableWidgetItem(listing.retainerName),
-    #                             QTableWidgetItem(listing_data.item.Name),
-    #                             QTableWidgetItem(f"{listing.pricePerUnit:,.0f}"),
-    #                             QTableWidgetItem(
-    #                                 f"{listing_data.listings.minPrice:,.0f}"
-    #                             ),
-    #                         ],
-    #                     )
-    #                 )
-    #             if listing.pricePerUnit <= listing_data.listings.minPrice:
-    #                 brush = self.good_brush
-    #             else:
-    #                 brush = self.bad_brush
-    #             for table_widget_item in row_data.widget_list:
-    #                 table_widget_item.setBackground(brush)
-    #         listing_row_index += 1
+    def save_cache(self) -> None:
+        json.dump(
+            [listing_data.listings.json() for listing_data in self.table_data.values()],
+            open(".data/retainer_worker_cache.json", "w"),
+        )
 
     def build_listing_data(self, listings: Listings) -> ListingData:
         listing_data = ListingData(
@@ -88,7 +55,9 @@ class RetainerWorker(QObject):
         return listing_data
 
     def update_listing_data(self, listing_data: ListingData) -> ListingData:
-        listing_data.listings = get_listings(listing_data.item.ID, self.world_id)
+        listing_data.listings = get_listings(
+            listing_data.item.ID, self.world_id, cache_timeout_s=0
+        )
 
     def timerEvent(self, event: QTimerEvent) -> None:
         if (listing_data := self.table_data.get(event.timerId())) is not None:
@@ -102,7 +71,7 @@ class RetainerWorker(QObject):
                 listing_data.timer.stop()
                 del self.table_data[event.timerId()]
         else:
-            super().timerEvent().event()
+            super().timerEvent(event)
 
     @Slot(Listings)
     def on_retainer_listings_changed(self, listings: Listings) -> None:

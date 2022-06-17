@@ -47,28 +47,16 @@ class Worker(QObject):
         self._table_row_data_mutex.unlock()
         return r
 
-    # @property
-    # def retainer_listings_list(self):
-    #     self._retainer_listings_list_mutex.lock()
-    #     r = copy(self._retainer_listings_list)
-    #     self._retainer_listings_list_mutex.unlock()
-    #     return r
-
     def refresh_listings(self, recipe_list: List[Recipe]) -> None:
         for recipe_index, recipe in enumerate(recipe_list):
             self.print_status(
                 f"Refreshing marketboard data {recipe_index+1}/{len(recipe_list)} ({recipe.ItemResult.Name})..."
             )
             universalis_mutex.lock()
-            listings = get_listings(recipe.ItemResult.ID, self.world)
+            listings: Listings = get_listings(recipe.ItemResult.ID, self.world)
             universalis_mutex.unlock()
             if any(listing.sellerID == self.seller_id for listing in listings.listings):
                 self.retainer_listings_changed.emit(listings)
-                # self._retainer_listings_list_mutex.lock()
-                # if listings not in self._retainer_listings_list:
-                #     self._retainer_listings_list.append(listings)
-                #     self.retainer_listings_changed.emit()
-                # self._retainer_listings_list_mutex.unlock()
             if not self.running:
                 break
 
