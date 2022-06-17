@@ -56,7 +56,7 @@ def save_to_disk() -> None:
 
 
 def _get_listings(id: int, world: Union[int, str]) -> Listings:
-    url = f"https://universalis.app/api/v2/{world}/{id}"
+    url = f"https://universalis.app/api/v2/{world}/{id}?noGst=true"
     global get_content_time
     now_time = time.time()
     if now_time - get_content_time < GET_CONTENT_RATE:
@@ -98,9 +98,10 @@ def get_listings(
             ] = recent_history_listing.pricePerUnit
 
         # listing_history_period = (listings.History.index.max() - listings.History.index.min()) / len(listings.History.index)
-        listings.regularSaleVelocity = (3600 * 24 * 7 * len(listings.History.index)) / (
-            listings.History.index.max() - listings.History.index.min()
-        )
+        if len(listings.History.index) > 0:
+            listings.regularSaleVelocity = (
+                3600 * 24 * 7 * len(listings.History.index)
+            ) / (listings.History.index.max() - listings.History.index.min())
 
         cache[str(_args)] = (listings, time.time())
 

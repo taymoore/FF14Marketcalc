@@ -138,17 +138,17 @@ class MainWindow(QMainWindow):
                 if listing.sellerID == self.seller_id:
                     if row_list_index < len(row_list):
                         row_data = row_list[row_list_index]
-                        row_data[2].setText(f"{listing.pricePerUnit / 1.05:,.0f}")
+                        row_data[2].setText(f"{listing.pricePerUnit:,.0f}")
                         row_data[3].setText(
-                            f"{self.get_min_price(listing_data.listings) / 1.05:,.0f}"
+                            f"{self.get_min_price(listing_data.listings):,.0f}"
                         )
                     else:
                         row_data = [
                             QTableWidgetItem(listing.retainerName),
                             QTableWidgetItem(listing_data.item.Name),
-                            QTableWidgetItem(f"{listing.pricePerUnit / 1.05:,.0f}"),
+                            QTableWidgetItem(f"{listing.pricePerUnit:,.0f}"),
                             QTableWidgetItem(
-                                f"{self.get_min_price(listing_data.listings) / 1.05:,.0f}"
+                                f"{self.get_min_price(listing_data.listings):,.0f}"
                             ),
                         ]
                         row_count = self.rowCount()
@@ -228,6 +228,7 @@ class MainWindow(QMainWindow):
         )
         # self.price_graph = MainWindow.PriceGraph()
         self.right_splitter.addWidget(self.price_graph)
+        self.right_splitter.setSizes([1, 1])
 
         self.main_layout.addWidget(self.centre_splitter)
         self.main_widget.setLayout(self.main_layout)

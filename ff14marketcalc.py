@@ -201,15 +201,15 @@ def get_revenue(id: int, world, refresh_cache: bool = False) -> float:
     history_price = [listing.pricePerUnit for listing in listings.recentHistory]
     # history_price_avg = sum(history_price) / len(history_price)
     return (
-        min(min(history_price), listings.minPrice / 1.05)
+        min(min(history_price), listings.minPrice)
         if len(history_price) > 0
-        else listings.minPrice / 1.05
-    )
+        else listings.minPrice
+    ) * 0.95
 
 
 def print_recipe(recipe: Recipe, world: Union[str, int]) -> str:
     string = ""
-    string += f"{recipe.ItemResult.Name} sells for: {get_revenue(recipe.ItemResult.ID, world, True):,.0f}\n"
+    string += f"{recipe.ItemResult.Name} sells for: {get_revenue(recipe.ItemResult.ID, world, True):,.0f} (inc. gst)\n"
     string += f"Expected profit: {get_profit(recipe, world, True):,.0f}\n"
 
     listings = get_listings(id=recipe.ItemResult.ID, world=world, cache_timeout_s=60)
