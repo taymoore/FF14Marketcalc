@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QPushButton,
 )
-from pyqtgraph import PlotWidget, DateAxisItem
+from pyqtgraph import PlotWidget, DateAxisItem, AxisItem
 from ff14marketcalc import get_profit, print_recipe
 from retainerWorker.models import ListingData
 from universalis.models import Listings
@@ -165,9 +165,43 @@ class MainWindow(QMainWindow):
                     row_list_index += 1
 
     class PriceGraph(PlotWidget):
+        class FmtAxesItem(AxisItem):
+            def __init__(
+                self,
+                orientation,
+                pen=None,
+                textPen=None,
+                linkView=None,
+                parent=None,
+                maxTickLength=-5,
+                showValues=True,
+                text="",
+                units="",
+                unitPrefix="",
+                **args,
+            ):
+                super().__init__(
+                    orientation,
+                    pen,
+                    textPen,
+                    linkView,
+                    parent,
+                    maxTickLength,
+                    showValues,
+                    text,
+                    units,
+                    unitPrefix,
+                    **args,
+                )
+
+            def tickStrings(self, values, scale, spacing):
+                return [f"{v:,.0f}" for v in values]
+
         def __init__(self, parent=None, background="default", plotItem=None, **kargs):
-            # axis = DateAxisItem()
-            # self.getPlotItem().setAxisItems({"bottom": axis})
+            kargs["axisItems"] = {
+                "bottom": DateAxisItem(),
+                "left": MainWindow.PriceGraph.FmtAxesItem(orientation="left"),
+            }
             super().__init__(parent, background, plotItem, **kargs)
 
     retainer_listings_changed = Signal(Listings)
@@ -223,9 +257,7 @@ class MainWindow(QMainWindow):
         )
         self.right_splitter.addWidget(self.retainer_table)
 
-        self.price_graph = MainWindow.PriceGraph(
-            self, axisItems={"bottom": DateAxisItem()}
-        )
+        self.price_graph = MainWindow.PriceGraph(self)
         # self.price_graph = MainWindow.PriceGraph()
         self.right_splitter.addWidget(self.price_graph)
         self.right_splitter.setSizes([1, 1])
