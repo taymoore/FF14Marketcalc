@@ -1,8 +1,10 @@
 import json
 import signal
+from turtle import pen
 from typing import Dict, List, Optional, Tuple
 from pydantic import BaseModel
-import matplotlib.dates
+import pandas as pd
+import numpy as np
 import pyperclip
 from PySide6.QtCore import Slot, Signal, QSize, QThread, QSemaphore, Qt, QBasicTimer
 from PySide6.QtGui import QBrush, QColor
@@ -22,7 +24,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QPushButton,
 )
-from pyqtgraph import PlotWidget, DateAxisItem, AxisItem
+from pyqtgraph import PlotWidget, DateAxisItem, AxisItem, PlotCurveItem, ViewBox
 from ff14marketcalc import get_profit, print_recipe
 from retainerWorker.models import ListingData
 from universalis.models import Listings
@@ -204,6 +206,24 @@ class MainWindow(QMainWindow):
             }
             super().__init__(parent, background, plotItem, **kargs)
 
+            # self.plotItem.setLabels(left="Price")
+            self.plotItem.getAxis("left").setLabel("Price", color="#00ff00")
+            self.p2 = ViewBox()
+            self.plotItem.showAxis("right")
+            self.plotItem.scene().addItem(self.p2)
+            self.plotItem.getAxis("right").linkToView(self.p2)
+            self.p2.setXLink(self.plotItem)
+            self.plotItem.getAxis("right").setLabel("Velocity", color="#00ffff")
+            self.p2.setMouseEnabled(y=True)
+            self.updateViews()
+            self.plotItem.vb.sigResized.connect(self.updateViews)
+            self.plotItem.vb.sigRangeChanged.connect(self.updateViews)
+
+        @Slot()
+        def updateViews(self) -> None:
+            self.p2.setGeometry(self.plotItem.vb.sceneBoundingRect())
+            # self.p2.linkedViewChanged(self.plotItem, self.p2.XAxis)
+
     retainer_listings_changed = Signal(Listings)
 
     def __init__(self):
@@ -269,7 +289,7 @@ class MainWindow(QMainWindow):
         self.status_bar_label = QLabel()
         self.statusBar().addPermanentWidget(self.status_bar_label, 1)
 
-        self.setMinimumSize(QSize(800, 600))
+        self.setMinimumSize(QSize(1000, 600))
 
         # classjob_list = get_classjob_doh_list()
 
@@ -372,7 +392,37 @@ class MainWindow(QMainWindow):
 
         # self.price_graph.plot(listings.History.to_dict())
         self.price_graph.clear()
-        self.price_graph.plot(listings.History.index, listings.History["Price"].values)
+        self.price_graph.p2.clear()
+        self.price_graph.plotItem.plot(
+            listings.History.index, listings.History["Price"].values, pen="g"
+        )
+        # self.price_graph.plotItem.plot(
+        #     (3600 * 24 * 7)
+        #     / np.asarray(
+        #         pd.Series(listings.History.index)
+        #         - pd.Series(listings.History.index).shift(periods=1)
+        #     ),
+        #     pen="b",
+        # )
+        if len(listings.History.index) > 2:
+            # smoothing: https://stackoverflow.com/a/63511354/7552308
+            self.price_graph.p2.addItem(
+                p2 := PlotCurveItem(
+                    x=np.asarray(listings.History.index[1:]),
+                    y=(3600 * 24 * 7)
+                    / np.asarray(
+                        pd.Series(listings.History.index)
+                        - pd.Series(listings.History.index).shift(periods=1)
+                    )[1:],
+                    pen="c",
+                ),
+            )
+            self.price_graph.p2.autoRange(item=p2)
+            self.price_graph.p2.enableAutoRange(self.price_graph.p2, True, True)
+            # self.price_graph.plotItem.enableAutoScale()
+            self.price_graph.plotItem.vb.enableAutoRange(
+                self.price_graph.plotItem, True, True
+            )
 
     @Slot()
     def on_refresh_button_clicked(self):

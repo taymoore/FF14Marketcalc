@@ -98,7 +98,10 @@ def get_listings(
             ] = recent_history_listing.pricePerUnit
 
         # listing_history_period = (listings.History.index.max() - listings.History.index.min()) / len(listings.History.index)
-        if len(listings.History.index) > 0:
+        if (
+            len(listings.History.index) > 0
+            and listings.History.index.max() != listings.History.index.min()
+        ):
             listings.regularSaleVelocity = (
                 3600 * 24 * 7 * len(listings.History.index)
             ) / (listings.History.index.max() - listings.History.index.min())
