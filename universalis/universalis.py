@@ -2,6 +2,7 @@ import json
 from typing import Any, Dict, Optional, Tuple, TypeVar, Union
 import logging
 import time
+import pandas as pd
 from pydantic import BaseModel
 import requests
 from PySide6.QtCore import QMutex
@@ -28,12 +29,18 @@ try:
         )
         for param, value in json.load(open(f".data/{CACHE_FILENAME}", "r")).items()
     }
+    for cache_tuple in cache.values():
+        listings = cache_tuple[0]
+        listings.History = pd.read_json(listings.History)
 except (IOError, ValueError):
     _logger.log(logging.WARN, f"Error loading {CACHE_FILENAME} cache")
     cache = {}
 
 
 def save_to_disk() -> None:
+    for cache_tuple in cache.values():
+        listings = cache_tuple[0]
+        listings.History = listings.History.to_json()
     try:
         new_cache: Dict[Any, Tuple[str, float]] = {
             param: (
@@ -77,6 +84,15 @@ def get_listings(
             f"Age of {CACHE_FILENAME}->{_args} Cache: {time.time() - cache[str(_args)][1]}s",
         )
     if str(_args) not in cache or time.time() - cache[str(_args)][1] > _cache_timeout_s:
-        cache[str(_args)] = (_get_listings(id, world), time.time())
+        listings = _get_listings(id, world)
+        if str(_args) in cache:
+            listings.History = cache[str(_args)][0].History
+        else:
+            listings.History = pd.DataFrame(columns=["Price"])
+        for recent_history_listing in listings.recentHistory:
+            listings.History.loc[
+                recent_history_listing.timestamp
+            ] = recent_history_listing.pricePerUnit
+        cache[str(_args)] = (listings, time.time())
 
     return cache[str(_args)][0]

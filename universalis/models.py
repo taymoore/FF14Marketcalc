@@ -13,6 +13,7 @@ class Listing(BaseModel):
     retainerName: Optional[str]
     sellerID: Optional[str]
     total: int
+    timestamp: Optional[int]
 
 
 # class History(BaseModel):
@@ -25,6 +26,7 @@ class Listings(BaseModel):
     lastUploadTime: int
     listings: List[Listing]
     recentHistory: List[Listing]
+    History: Optional[Union[pd.DataFrame, str]] = None
     currentAveragePrice: float
     currentAveragePriceNQ: float
     currentAveragePriceHQ: float
@@ -41,3 +43,6 @@ class Listings(BaseModel):
     maxPriceNQ: int
     maxPriceHQ: int
     worldName: Optional[str]
+
+    class Config:
+        arbitrary_types_allowed = True
