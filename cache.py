@@ -32,8 +32,9 @@ class Persist:
         return_type: Union[BaseCollectionModel, BaseModel],
     ) -> None:
         self.timeout_s = cache_timeout_s
-        self.func = func
+        self.func = func  # type: ignore
         self.filename = filename
+        self.return_type = return_type
         try:
             self.cache: Dict[Any, Tuple[BaseModel, float]] = {
                 param: (
@@ -60,7 +61,7 @@ class Persist:
                 )
                 for param, value in self.cache.items()
             }
-            json.dump(new_cache, open(f".data/{self.filename}", "w"))
+            json.dump(new_cache, open(f".data/{self.filename}", "w"), indent=2)
         except Exception as e:
             print(str(e))
 
@@ -133,19 +134,7 @@ def persist_to_file(file_name: str, timeout_s: float, return_type: BaseCollectio
                     else return_type.parse_obj(value[0]).json()
                 )
                 new_cache[param] = (value_str, value[1])
-            # new_cache: Dict[Any, Tuple[str, float]] = {
-            #     param: (
-            #         value[0].json()
-            #         if isinstance(value[0], BaseModel)
-            #         or isinstance(value[0], BaseCollectionModel)
-            #         else return_type.parse_obj(value[0]).json(),
-            #         value[1],
-            #     )
-            #     for param, value in cache.items()
-            # }
-            print("cache")
-            json.dump(new_cache, open(f".data/{file_name}", "w"))
-            print("dump")
+            json.dump(new_cache, open(f".data/{file_name}", "w"), indent=2)
         except Exception as e:
             print(str(e))
 

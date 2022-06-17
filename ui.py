@@ -108,7 +108,9 @@ class MainWindow(QMainWindow):
             self.verticalHeader().hide()
             self.setEditTriggers(QAbstractItemView.NoEditTriggers)
             self.seller_id = seller_id
-            self.table_data: Dict[int, List[List[QTableWidgetItem]]] = {}
+            self.table_data: Dict[
+                int, List[List[QTableWidgetItem]]
+            ] = {}  # itemID -> row -> column
             self.good_color = QColor(0, 255, 0, 50)
             self.bad_color = QColor(255, 0, 0, 50)
 
@@ -116,6 +118,15 @@ class MainWindow(QMainWindow):
             self.clearContents()
             self.setRowCount(0)
             self.table_data.clear()
+
+        def get_min_price(self, listings: Listings) -> float:
+            return min(
+                [
+                    listing.pricePerUnit
+                    for listing in listings.listings
+                    if listing.sellerID != self.seller_id
+                ]
+            )
 
         @Slot(list)
         def on_listing_data_updated(self, listing_data: ListingData) -> None:
@@ -125,14 +136,18 @@ class MainWindow(QMainWindow):
                 if listing.sellerID == self.seller_id:
                     if row_list_index < len(row_list):
                         row_data = row_list[row_list_index]
-                        row_data[2].setText(f"{listing.pricePerUnit:,.0f}")
-                        row_data[3].setText(f"{listing_data.listings.minPrice:,.0f}")
+                        row_data[2].setText(f"{listing.pricePerUnit / 1.05:,.0f}")
+                        row_data[3].setText(
+                            f"{self.get_min_price(listing_data.listings) / 1.05:,.0f}"
+                        )
                     else:
                         row_data = [
                             QTableWidgetItem(listing.retainerName),
                             QTableWidgetItem(listing_data.item.Name),
-                            QTableWidgetItem(f"{listing.pricePerUnit:,.0f}"),
-                            QTableWidgetItem(f"{listing_data.listings.minPrice:,.0f}"),
+                            QTableWidgetItem(f"{listing.pricePerUnit / 1.05:,.0f}"),
+                            QTableWidgetItem(
+                                f"{self.get_min_price(listing_data.listings) / 1.05:,.0f}"
+                            ),
                         ]
                         row_count = self.rowCount()
                         self.insertRow(row_count)
@@ -192,6 +207,9 @@ class MainWindow(QMainWindow):
 
         self.centre_splitter.addWidget(self.left_splitter)
         self.retainer_table = MainWindow.RetainerTable(self, self.seller_id)
+        self.retainer_table.cellDoubleClicked.connect(
+            self.on_retainer_table_double_clicked
+        )
         self.centre_splitter.addWidget(self.retainer_table)
 
         self.main_layout.addWidget(self.centre_splitter)
@@ -274,6 +292,15 @@ class MainWindow(QMainWindow):
         universalis_mutex.lock()
         self.table.add_recipes(recipe_list=recipes)
         universalis_mutex.unlock()
+
+    @Slot(int, int)
+    def on_retainer_table_double_clicked(self, row: int, column: int):
+        for row_group_list in self.retainer_table.table_data.values():
+            for widget_list in row_group_list:
+                if widget_list[0].row() != row:
+                    continue
+                pyperclip.copy(widget_list[1].text())
+                return
 
     @Slot(int, int)
     def on_table_double_clicked(self, row: int, column: int):

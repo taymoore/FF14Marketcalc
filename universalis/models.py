@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
 from pydantic import BaseModel
 from pydantic_collections import BaseCollectionModel
+import pandas as pd
 
 
 class Listing(BaseModel):
@@ -14,9 +15,8 @@ class Listing(BaseModel):
     total: int
 
 
-# class Listings(BaseCollectionModel[Listing]):
-#     class Config:
-#         validate_assignment_strict = False
+# class History(BaseModel):
+#     pass
 
 
 class Listings(BaseModel):

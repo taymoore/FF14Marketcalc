@@ -1,4 +1,5 @@
-from typing import Optional, TypeVar, Union
+import json
+from typing import Any, Dict, Optional, Tuple, TypeVar, Union
 import logging
 import time
 from pydantic import BaseModel
@@ -14,6 +15,36 @@ GET_CONTENT_RATE = 0.05
 get_content_time = time.time() - GET_CONTENT_RATE
 
 universalis_mutex = QMutex()
+
+CACHE_TIMEOUT_S = 3600
+CACHE_FILENAME = "listings.json"
+
+cache: Dict[Any, Tuple[Listings, float]]
+try:
+    cache = {
+        param: (
+            Listings.parse_raw(value[0]),
+            value[1],
+        )
+        for param, value in json.load(open(f".data/{CACHE_FILENAME}", "r")).items()
+    }
+except (IOError, ValueError):
+    _logger.log(logging.WARN, f"Error loading {CACHE_FILENAME} cache")
+    cache = {}
+
+
+def save_to_disk() -> None:
+    try:
+        new_cache: Dict[Any, Tuple[str, float]] = {
+            param: (
+                value[0].json(),
+                value[1],
+            )
+            for param, value in cache.items()
+        }
+        json.dump(new_cache, open(f".data/{CACHE_FILENAME}", "w"), indent=2)
+    except Exception as e:
+        print(str(e))
 
 
 def _get_listings(id: int, world: Union[int, str]) -> Listings:
@@ -32,8 +63,20 @@ def _get_listings(id: int, world: Union[int, str]) -> Listings:
     return Listings.parse_obj(content_response.json())
 
 
-get_listings = Persist(_get_listings, "listings.json", 3600, Listings)
+def get_listings(
+    id: int, world: Union[int, str], cache_timeout_s: Optional[float] = None
+) -> Listings:
+    _cache_timeout_s = (
+        cache_timeout_s if cache_timeout_s is not None else CACHE_TIMEOUT_S
+    )
+    _args = [id, world]
 
+    if str(_args) in cache:
+        _logger.log(
+            logging.DEBUG,
+            f"Age of {CACHE_FILENAME}->{_args} Cache: {time.time() - cache[str(_args)][1]}s",
+        )
+    if str(_args) not in cache or time.time() - cache[str(_args)][1] > _cache_timeout_s:
+        cache[str(_args)] = (_get_listings(id, world), time.time())
 
-def save_to_disk() -> None:
-    get_listings.save_to_disk()
+    return cache[str(_args)][0]

@@ -43,6 +43,7 @@ class RetainerWorker(QObject):
         json.dump(
             [listing_data.listings.json() for listing_data in self.table_data.values()],
             open(".data/retainer_worker_cache.json", "w"),
+            indent=2,
         )
 
     def build_listing_data(self, listings: Listings) -> ListingData:
