@@ -1,5 +1,6 @@
 import json
 import signal
+from scipy.signal import savgol_filter
 from turtle import pen
 from typing import Dict, List, Optional, Tuple
 from pydantic import BaseModel
@@ -29,9 +30,11 @@ from pyqtgraph import (
     DateAxisItem,
     AxisItem,
     PlotCurveItem,
+    PlotDataItem,
     ViewBox,
     Point,
     functions,
+    mkPen,
 )
 from ff14marketcalc import get_profit, print_recipe
 from retainerWorker.models import ListingData
@@ -244,6 +247,8 @@ class MainWindow(QMainWindow):
             # # self.plotItem.vb.sigRangeChanged.connect(self.updateViews)
             self.p1 = self.plotItem
             self.p1.getAxis("left").setLabel("Velocity", color="#00ffff")
+            self.p1_pen = mkPen(color="#00ff00", width=2)
+            # self.p1.setLogMode(False, True)
 
             ## create a new ViewBox, link the right axis to its coordinate system
             self.p2 = ViewBox()
@@ -256,11 +261,12 @@ class MainWindow(QMainWindow):
             ## create third ViewBox.
             ## this time we need to create a new axis as well.
             self.p3 = ViewBox()
-            self.ax3 = AxisItem("right")
+            self.ax3 = MainWindow.PriceGraph.FmtAxesItem(orientation="right")
             self.p1.layout.addItem(self.ax3, 2, 3)
             self.p1.scene().addItem(self.p3)
             self.ax3.linkToView(self.p3)
             self.p3.setXLink(self.p1)
+            self.p3.setYLink(self.p2)
             self.ax3.setZValue(-10000)
             self.ax3.setLabel("Listings", color="#ff00ff")
 
@@ -292,7 +298,6 @@ class MainWindow(QMainWindow):
             self.p3.updateAutoRange()
 
             bounds = [np.inf, -np.inf]
-
             for items in (
                 self.p1.vb.addedItems,
                 self.p2.addedItems,
@@ -306,6 +311,20 @@ class MainWindow(QMainWindow):
                     bounds[1] = max(_bounds[1], bounds[1])
             if bounds[0] != np.inf and bounds[1] != -np.inf:
                 self.p1.vb.setRange(xRange=bounds)
+
+            bounds = [np.inf, -np.inf]
+            for items in (
+                self.p2.addedItems,
+                self.p3.addedItems,
+            ):
+                for item in items:
+                    _bounds = item.dataBounds(1)
+                    if _bounds[0] is None or _bounds[1] is None:
+                        continue
+                    bounds[0] = min(_bounds[0], bounds[0])
+                    bounds[1] = max(_bounds[1], bounds[1])
+            if bounds[0] != np.inf and bounds[1] != -np.inf:
+                self.p2.setRange(yRange=bounds)
 
         def wheelEvent(self, ev, axis=None):
             super().wheelEvent(ev)
@@ -408,18 +427,15 @@ class MainWindow(QMainWindow):
         # https://realpython.com/python-pyqt-qthread/
         self.worker_thread = QThread(self)
         self.worker = Worker(
-            # classjob_level_max_dict={
-            #     8: 70,
-            #     9: 70,
-            #     10: 69,
-            #     11: 78,
-            #     12: 70,
-            #     13: 73,
-            #     14: 70,
-            #     15: 67,
-            # },
             classjob_level_max_dict={
-                8: 3,
+                8: 70,
+                9: 70,
+                10: 69,
+                11: 78,
+                12: 70,
+                13: 73,
+                14: 70,
+                15: 67,
             },
             world=world_id,
             seller_id=self.seller_id,
@@ -511,11 +527,14 @@ class MainWindow(QMainWindow):
             print_recipe(self.table.recipe_list[row], world_id)
         )
         universalis_mutex.unlock()
+        self.plot_listings(listings)
 
     def plot_listings(self, listings: Listings) -> None:
         self.price_graph.p1.clear()
         self.price_graph.p2.clear()
         self.price_graph.p3.clear()
+        listings.history.sort_index(inplace=True)
+        listings.listing_history.sort_index(inplace=True)
         self.price_graph.p1.plot(
             x=np.asarray(listings.history.index[1:]),
             y=(3600 * 24 * 7)
@@ -524,29 +543,48 @@ class MainWindow(QMainWindow):
                 - pd.Series(listings.history.index).shift(periods=1)
             )[1:],
             pen="c",
+            symbol="o",
+            symbolSize=5,
+            symbolBrush=("c"),
         )
 
         if len(listings.history.index) > 2:
             # smoothing: https://stackoverflow.com/a/63511354/7552308
+            # history_df = listings.history[["Price"]].apply(
+            #     savgol_filter, window_length=5, polyorder=2
+            # )
+            # self.price_graph.p2.addItem(
+            #     p2 := PlotDataItem(
+            #         np.asarray(history_df.index),
+            #         history_df["Price"].values,
+            #         pen=self.price_graph.p1_pen,
+            #         symbol="o",
+            #         symbolSize=5,
+            #         symbolBrush=("g"),
+            #     ),
+            # )
             self.price_graph.p2.addItem(
-                p2 := PlotCurveItem(
+                p2 := PlotDataItem(
                     np.asarray(listings.history.index),
                     listings.history["Price"].values,
-                    pen="g",
+                    pen=self.price_graph.p1_pen,
+                    symbol="o",
+                    symbolSize=5,
+                    symbolBrush=("g"),
                 ),
             )
-            # self.price_graph.p2.autoRange(item=p2)
-            # self.price_graph.p2.enableAutoRange(self.price_graph.p2, True, True)
-            # self.price_graph.p2.enableAutoRange(axis="xy")
-            # self.price_graph.p2.updateAutoRange()
 
         self.price_graph.p3.addItem(
-            p3 := PlotCurveItem(
+            p3 := PlotDataItem(
                 np.asarray(listings.listing_history.index),
                 listings.listing_history["Price"].values,
                 pen="m",
+                symbol="o",
+                symbolSize=5,
+                symbolBrush=("m"),
             ),
         )
+        # p3.setLogMode(False, True)
         self.price_graph.auto_range()
         # self.price_graph.p3.enableAutoRange(axis="xy")
         # self.price_graph.p3.updateAutoRange()
