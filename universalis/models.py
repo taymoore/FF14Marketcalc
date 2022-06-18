@@ -26,7 +26,8 @@ class Listings(BaseModel):
     lastUploadTime: int
     listings: List[Listing]
     recentHistory: List[Listing]
-    History: Optional[Union[pd.DataFrame, str]] = None
+    history: Optional[Union[pd.DataFrame, str]] = None
+    listing_history: Optional[Union[pd.DataFrame, str]] = None
     currentAveragePrice: float
     currentAveragePriceNQ: float
     currentAveragePriceHQ: float

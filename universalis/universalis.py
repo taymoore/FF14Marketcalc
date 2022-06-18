@@ -31,8 +31,20 @@ try:
     }
     for cache_tuple in cache.values():
         listings = cache_tuple[0]
-        listings.History = pd.read_json(listings.History, convert_axes=False)
-        listings.History.index = listings.History.index.astype("float64")
+        listings.history = (
+            pd.read_json(listings.history, convert_axes=False)
+            if listings.history is not None
+            else pd.DataFrame(columns=["Price"])
+        )
+        listings.listing_history = (
+            pd.read_json(listings.listing_history, convert_axes=False)
+            if listings.listing_history is not None
+            else pd.DataFrame(columns=["Price"])
+        )
+        listings.history.index = listings.history.index.astype("float64")
+        listings.listing_history.index = listings.listing_history.index.astype(
+            "float64"
+        )
 except (IOError, ValueError):
     _logger.log(logging.WARN, f"Error loading {CACHE_FILENAME} cache")
     cache = {}
@@ -41,7 +53,8 @@ except (IOError, ValueError):
 def save_to_disk() -> None:
     for cache_tuple in cache.values():
         listings = cache_tuple[0]
-        listings.History = listings.History.to_json()
+        listings.history = listings.history.to_json()
+        listings.listing_history = listings.listing_history.to_json()
     try:
         new_cache: Dict[Any, Tuple[str, float]] = {
             param: (
@@ -88,23 +101,27 @@ def get_listings(
         listings = _get_listings(id, world)
 
         if str(_args) in cache:
-            listings.History = cache[str(_args)][0].History
+            listings.history = cache[str(_args)][0].history
+            listings.listing_history = cache[str(_args)][0].listing_history
         else:
-            listings.History = pd.DataFrame(columns=["Price"])
+            listings.history = pd.DataFrame(columns=["Price"])
+            listings.listing_history = pd.DataFrame(columns=["Price"])
+        # Update persistent memory items
         for recent_history_listing in listings.recentHistory:
-            listings.History.loc[
+            listings.history.loc[
                 recent_history_listing.timestamp
-                # pd.to_datetime(recent_history_listing.timestamp, unit="s")
             ] = recent_history_listing.pricePerUnit
+        for listing in listings.listings:
+            listings.listing_history.loc[listing.lastReviewTime] = listing.pricePerUnit
 
-        # listing_history_period = (listings.History.index.max() - listings.History.index.min()) / len(listings.History.index)
+        # Velocity calculation
         if (
-            len(listings.History.index) > 0
-            and listings.History.index.max() != listings.History.index.min()
+            len(listings.history.index) > 0
+            and listings.history.index.max() != listings.history.index.min()
         ):
             listings.regularSaleVelocity = (
-                3600 * 24 * 7 * len(listings.History.index)
-            ) / (listings.History.index.max() - listings.History.index.min())
+                3600 * 24 * 7 * len(listings.history.index)
+            ) / (listings.history.index.max() - listings.history.index.min())
 
         cache[str(_args)] = (listings, time.time())
 

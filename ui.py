@@ -24,7 +24,15 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QPushButton,
 )
-from pyqtgraph import PlotWidget, DateAxisItem, AxisItem, PlotCurveItem, ViewBox
+from pyqtgraph import (
+    PlotWidget,
+    DateAxisItem,
+    AxisItem,
+    PlotCurveItem,
+    ViewBox,
+    Point,
+    functions,
+)
 from ff14marketcalc import get_profit, print_recipe
 from retainerWorker.models import ListingData
 from universalis.models import Listings
@@ -203,26 +211,129 @@ class MainWindow(QMainWindow):
             kargs["axisItems"] = {
                 "bottom": DateAxisItem(),
                 "left": MainWindow.PriceGraph.FmtAxesItem(orientation="left"),
+                "right": MainWindow.PriceGraph.FmtAxesItem(orientation="right"),
             }
             super().__init__(parent, background, plotItem, **kargs)
 
-            # self.plotItem.setLabels(left="Price")
-            self.plotItem.getAxis("left").setLabel("Price", color="#00ff00")
+            # # self.plotItem.setLabels(left="Price")
+            # self.plotItem.getAxis("left").setLabel("Velocity", color="#00ffff")
+            # self.p2 = ViewBox()
+            # self.plotItem.showAxis("right")
+            # self.plotItem.scene().addItem(self.p2)
+            # # self.plotItem.getAxis("right").linkToView(self.p2)
+            # self.p2.setXLink(self.plotItem)
+            # self.plotItem.getAxis("right").setLabel("Purchases", color="#00ff00")
+            # self.p2.enableAutoRange(axis=self.plotItem.vb.XYAxes)
+            # # self.p2.setAutoPan(y=True, x=True)
+            # # self.p2.setMouseEnabled(y=True)
+
+            # self.p3 = ViewBox()
+            # self.ax3 = AxisItem("right")
+            # self.plotItem.layout.addItem(self.ax3, 2, 3)
+            # self.plotItem.scene().addItem(self.p3)
+            # self.ax3.linkToView(self.p3)
+            # self.p3.setXLink(self.plotItem)
+            # self.ax3.setZValue(-10000)
+            # self.ax3.setLabel("Listings", color="#ff00ff")
+            # self.p3.enableAutoRange(axis=self.p3.XYAxes)
+            # # self.p3.setAutoPan(y=True, x=True)
+            # # self.p3.setMouseEnabled(y=True)
+
+            # self.updateViews()
+            # self.plotItem.vb.sigResized.connect(self.updateViews)
+            # # self.plotItem.vb.sigRangeChanged.connect(self.updateViews)
+            self.p1 = self.plotItem
+            self.p1.getAxis("left").setLabel("Velocity", color="#00ffff")
+
+            ## create a new ViewBox, link the right axis to its coordinate system
             self.p2 = ViewBox()
-            self.plotItem.showAxis("right")
-            self.plotItem.scene().addItem(self.p2)
-            self.plotItem.getAxis("right").linkToView(self.p2)
-            self.p2.setXLink(self.plotItem)
-            self.plotItem.getAxis("right").setLabel("Velocity", color="#00ffff")
-            self.p2.setMouseEnabled(y=True)
+            self.p1.showAxis("right")
+            self.p1.scene().addItem(self.p2)
+            self.p1.getAxis("right").linkToView(self.p2)
+            self.p2.setXLink(self.p1)
+            self.p1.getAxis("right").setLabel("Purchases", color="#00ff00")
+
+            ## create third ViewBox.
+            ## this time we need to create a new axis as well.
+            self.p3 = ViewBox()
+            self.ax3 = AxisItem("right")
+            self.p1.layout.addItem(self.ax3, 2, 3)
+            self.p1.scene().addItem(self.p3)
+            self.ax3.linkToView(self.p3)
+            self.p3.setXLink(self.p1)
+            self.ax3.setZValue(-10000)
+            self.ax3.setLabel("Listings", color="#ff00ff")
+
             self.updateViews()
-            self.plotItem.vb.sigResized.connect(self.updateViews)
-            self.plotItem.vb.sigRangeChanged.connect(self.updateViews)
+            self.p1.vb.sigResized.connect(self.updateViews)
 
         @Slot()
         def updateViews(self) -> None:
-            self.p2.setGeometry(self.plotItem.vb.sceneBoundingRect())
-            # self.p2.linkedViewChanged(self.plotItem, self.p2.XAxis)
+            # self.p2.setGeometry(self.plotItem.vb.sceneBoundingRect())
+            # self.p3.setGeometry(self.plotItem.vb.sceneBoundingRect())
+            # # self.p2.linkedViewChanged(self.plotItem.vb, self.p2.XAxis)
+            # # self.p3.linkedViewChanged(self.plotItem.vb, self.p3.XAxis)
+            # # self.enableAutoRange(axis="xy")
+            # # self.setAutoVisible(y=True)
+            self.p2.setGeometry(self.p1.vb.sceneBoundingRect())
+            self.p3.setGeometry(self.p1.vb.sceneBoundingRect())
+
+            ## need to re-update linked axes since this was called
+            ## incorrectly while views had different shapes.
+            ## (probably this should be handled in ViewBox.resizeEvent)
+            self.p2.linkedViewChanged(self.p1.vb, self.p2.XAxis)
+            self.p3.linkedViewChanged(self.p1.vb, self.p3.XAxis)
+
+        def auto_range(self):
+            self.p2.enableAutoRange(axis="y")
+            self.p3.enableAutoRange(axis="y")
+            self.p1.vb.updateAutoRange()
+            self.p2.updateAutoRange()
+            self.p3.updateAutoRange()
+
+            bounds = [np.inf, -np.inf]
+
+            for items in (
+                self.p1.vb.addedItems,
+                self.p2.addedItems,
+                self.p3.addedItems,
+            ):
+                for item in items:
+                    _bounds = item.dataBounds(0)
+                    if _bounds[0] is None or _bounds[1] is None:
+                        continue
+                    bounds[0] = min(_bounds[0], bounds[0])
+                    bounds[1] = max(_bounds[1], bounds[1])
+            if bounds[0] != np.inf and bounds[1] != -np.inf:
+                self.p1.vb.setRange(xRange=bounds)
+
+        def wheelEvent(self, ev, axis=None):
+            super().wheelEvent(ev)
+            for vb in (
+                self.p1.vb,
+                self.p2,
+                self.p3,
+            ):
+                if axis in (0, 1):
+                    mask = [False, False]
+                    mask[axis] = vb.state["mouseEnabled"][axis]
+                else:
+                    mask = vb.state["mouseEnabled"][:]
+                s = 1.02 ** (
+                    (ev.angleDelta().y() - ev.angleDelta().x())
+                    * vb.state["wheelScaleFactor"]
+                )  # actual scaling factor
+                s = [(None if m is False else s) for m in mask]
+                center = Point(
+                    functions.invertQTransform(vb.childGroup.transform()).map(
+                        ev.position()
+                    )
+                )
+
+                vb._resetTarget()
+                vb.scaleBy(s, center)
+                ev.accept()
+                vb.sigRangeChangedManually.emit(mask)
 
     retainer_listings_changed = Signal(Listings)
 
@@ -259,6 +370,7 @@ class MainWindow(QMainWindow):
 
         self.table = MainWindow.RecipeListTable(self)
         self.table.cellDoubleClicked.connect(self.on_table_double_clicked)
+        self.table.cellClicked.connect(self.on_table_clicked)
         self.table_search_layout.addWidget(self.table)
 
         self.table_search_widget.setLayout(self.table_search_layout)
@@ -296,15 +408,18 @@ class MainWindow(QMainWindow):
         # https://realpython.com/python-pyqt-qthread/
         self.worker_thread = QThread(self)
         self.worker = Worker(
+            # classjob_level_max_dict={
+            #     8: 70,
+            #     9: 70,
+            #     10: 69,
+            #     11: 78,
+            #     12: 70,
+            #     13: 73,
+            #     14: 70,
+            #     15: 67,
+            # },
             classjob_level_max_dict={
-                8: 70,
-                9: 70,
-                10: 69,
-                11: 78,
-                12: 70,
-                13: 73,
-                14: 70,
-                15: 67,
+                8: 3,
             },
             world=world_id,
             seller_id=self.seller_id,
@@ -373,9 +488,16 @@ class MainWindow(QMainWindow):
                 return
 
     @Slot(int, int)
-    def on_table_double_clicked(self, row: int, column: int):
+    def on_table_clicked(self, row: int, column: int):
         item_name = self.table.recipe_list[row].ItemResult.Name
         pyperclip.copy(item_name)
+        self.plot_listings(
+            get_listings(self.table.recipe_list[row].ItemResult.ID, world_id)
+        )
+
+    @Slot(int, int)
+    def on_table_double_clicked(self, row: int, column: int):
+        item_name = self.table.recipe_list[row].ItemResult.Name
         self.status_bar_label.setText(f"Processing {item_name}...")
 
         universalis_mutex.lock()
@@ -390,39 +512,54 @@ class MainWindow(QMainWindow):
         )
         universalis_mutex.unlock()
 
-        # self.price_graph.plot(listings.History.to_dict())
-        self.price_graph.clear()
+    def plot_listings(self, listings: Listings) -> None:
+        self.price_graph.p1.clear()
         self.price_graph.p2.clear()
-        self.price_graph.plotItem.plot(
-            listings.History.index, listings.History["Price"].values, pen="g"
+        self.price_graph.p3.clear()
+        self.price_graph.p1.plot(
+            x=np.asarray(listings.history.index[1:]),
+            y=(3600 * 24 * 7)
+            / np.asarray(
+                pd.Series(listings.history.index)
+                - pd.Series(listings.history.index).shift(periods=1)
+            )[1:],
+            pen="c",
         )
-        # self.price_graph.plotItem.plot(
-        #     (3600 * 24 * 7)
-        #     / np.asarray(
-        #         pd.Series(listings.History.index)
-        #         - pd.Series(listings.History.index).shift(periods=1)
-        #     ),
-        #     pen="b",
-        # )
-        if len(listings.History.index) > 2:
+
+        if len(listings.history.index) > 2:
             # smoothing: https://stackoverflow.com/a/63511354/7552308
             self.price_graph.p2.addItem(
                 p2 := PlotCurveItem(
-                    x=np.asarray(listings.History.index[1:]),
-                    y=(3600 * 24 * 7)
-                    / np.asarray(
-                        pd.Series(listings.History.index)
-                        - pd.Series(listings.History.index).shift(periods=1)
-                    )[1:],
-                    pen="c",
+                    np.asarray(listings.history.index),
+                    listings.history["Price"].values,
+                    pen="g",
                 ),
             )
-            self.price_graph.p2.autoRange(item=p2)
-            self.price_graph.p2.enableAutoRange(self.price_graph.p2, True, True)
-            # self.price_graph.plotItem.enableAutoScale()
-            self.price_graph.plotItem.vb.enableAutoRange(
-                self.price_graph.plotItem, True, True
-            )
+            # self.price_graph.p2.autoRange(item=p2)
+            # self.price_graph.p2.enableAutoRange(self.price_graph.p2, True, True)
+            # self.price_graph.p2.enableAutoRange(axis="xy")
+            # self.price_graph.p2.updateAutoRange()
+
+        self.price_graph.p3.addItem(
+            p3 := PlotCurveItem(
+                np.asarray(listings.listing_history.index),
+                listings.listing_history["Price"].values,
+                pen="m",
+            ),
+        )
+        self.price_graph.auto_range()
+        # self.price_graph.p3.enableAutoRange(axis="xy")
+        # self.price_graph.p3.updateAutoRange()
+        # self.price_graph.plotItem.vb.autoRange()
+        # self.price_graph.plotItem.vb.enableAutoRange()
+        # self.price_graph.p3.autoRange(item=p3)
+        # self.price_graph.p3.enableAutoRange(self.price_graph.p3, True, True)
+
+        # self.price_graph.plotItem.vb.enableAutoRange(
+        #     self.price_graph.plotItem, True, True
+        # )
+        # self.price_graph.plotItem.vb.enableAutoRange(self.price_graph.p2, True, True)
+        # self.price_graph.plotItem.vb.enableAutoRange(self.price_graph.p3, True, True)
 
     @Slot()
     def on_refresh_button_clicked(self):
@@ -460,3 +597,7 @@ if __name__ == "__main__":
     main_window.show()
 
     app.exec()
+
+# Ideas:
+# Better caching of persistent data
+# look for matching retainers when pulling all data, not just in a few loops
