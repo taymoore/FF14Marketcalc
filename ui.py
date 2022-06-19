@@ -1,6 +1,7 @@
 import json
 import signal
 from scipy.signal import savgol_filter
+from scipy import stats
 from turtle import pen
 from typing import Dict, List, Optional, Tuple
 from pydantic import BaseModel
@@ -224,7 +225,6 @@ class MainWindow(QMainWindow):
             self.p1 = self.plotItem
             self.p1.getAxis("left").setLabel("Velocity", color="#00ffff")
             self.p1_pen = mkPen(color="#00ff00", width=2)
-            self.p2.setLogMode(False, True)
 
             ## create a new ViewBox, link the right axis to its coordinate system
             self.p2 = ViewBox()
@@ -233,6 +233,10 @@ class MainWindow(QMainWindow):
             self.p1.getAxis("right").linkToView(self.p2)
             self.p2.setXLink(self.p1)
             self.p1.getAxis("right").setLabel("Purchases", color="#00ff00")
+            # self.p1.vb.setLogMode("y", True)
+            # self.p2.setLogMode(self.p1.getAxis("right"), True)
+            # self.p1.getAxis("right").setLogMode(False, True)
+            # self.p1.getAxis("right").enableAutoSIPrefix(False)
 
             ## create third ViewBox.
             ## this time we need to create a new axis as well.
@@ -245,7 +249,13 @@ class MainWindow(QMainWindow):
             self.p3.setYLink(self.p2)
             self.ax3.setZValue(-10000)
             self.ax3.setLabel("Listings", color="#ff00ff")
+            self.ax3.hide()
+            self.ax3.setGrid(128)
+            # self.ax3.setLogMode(False, True)
+            # self.p3.setLogMode("y", True)
             # self.ax3.hideAxis()
+            # self.ax3.setLogMode(False, True)
+            # self.ax3.enableAutoSIPrefix(False)
 
             self.updateViews()
             self.p1.vb.sigResized.connect(self.updateViews)
@@ -552,16 +562,30 @@ class MainWindow(QMainWindow):
                 ),
             )
 
+        if listings.listing_history.index.size > 2:
+            df = listings.listing_history[
+                (np.abs(stats.zscore(listings.listing_history)) < 3).all(axis=1)
+            ]
+            if df.index.size != listings.listing_history.index.size:
+                print("Ignoring outliers:")
+                print(
+                    listings.listing_history.loc[
+                        listings.listing_history.index.difference(df.index)
+                    ]["Price"]
+                )
+        else:
+            df = listings.listing_history
         self.price_graph.p3.addItem(
             p3 := PlotDataItem(
-                np.asarray(listings.listing_history.index),
-                listings.listing_history["Price"].values,
+                np.asarray(df.index),
+                df["Price"].values,
                 pen="m",
                 symbol="o",
                 symbolSize=5,
                 symbolBrush=("m"),
             ),
         )
+        # p3.setLogMode(False, True)
         self.price_graph.auto_range()
 
     @Slot()
