@@ -24,6 +24,8 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QAbstractItemView,
     QPushButton,
+    QMenuBar,
+    QWidgetAction,
 )
 from pyqtgraph import (
     PlotWidget,
@@ -37,6 +39,7 @@ from pyqtgraph import (
     mkPen,
 )
 from ff14marketcalc import get_profit, print_recipe
+from itemCleaner.itemCleaner import ItemCleanerForm
 from retainerWorker.models import ListingData
 from universalis.models import Listings
 from worker import Worker
@@ -218,37 +221,10 @@ class MainWindow(QMainWindow):
             }
             super().__init__(parent, background, plotItem, **kargs)
 
-            # # self.plotItem.setLabels(left="Price")
-            # self.plotItem.getAxis("left").setLabel("Velocity", color="#00ffff")
-            # self.p2 = ViewBox()
-            # self.plotItem.showAxis("right")
-            # self.plotItem.scene().addItem(self.p2)
-            # # self.plotItem.getAxis("right").linkToView(self.p2)
-            # self.p2.setXLink(self.plotItem)
-            # self.plotItem.getAxis("right").setLabel("Purchases", color="#00ff00")
-            # self.p2.enableAutoRange(axis=self.plotItem.vb.XYAxes)
-            # # self.p2.setAutoPan(y=True, x=True)
-            # # self.p2.setMouseEnabled(y=True)
-
-            # self.p3 = ViewBox()
-            # self.ax3 = AxisItem("right")
-            # self.plotItem.layout.addItem(self.ax3, 2, 3)
-            # self.plotItem.scene().addItem(self.p3)
-            # self.ax3.linkToView(self.p3)
-            # self.p3.setXLink(self.plotItem)
-            # self.ax3.setZValue(-10000)
-            # self.ax3.setLabel("Listings", color="#ff00ff")
-            # self.p3.enableAutoRange(axis=self.p3.XYAxes)
-            # # self.p3.setAutoPan(y=True, x=True)
-            # # self.p3.setMouseEnabled(y=True)
-
-            # self.updateViews()
-            # self.plotItem.vb.sigResized.connect(self.updateViews)
-            # # self.plotItem.vb.sigRangeChanged.connect(self.updateViews)
             self.p1 = self.plotItem
             self.p1.getAxis("left").setLabel("Velocity", color="#00ffff")
             self.p1_pen = mkPen(color="#00ff00", width=2)
-            # self.p1.setLogMode(False, True)
+            self.p2.setLogMode(False, True)
 
             ## create a new ViewBox, link the right axis to its coordinate system
             self.p2 = ViewBox()
@@ -269,24 +245,15 @@ class MainWindow(QMainWindow):
             self.p3.setYLink(self.p2)
             self.ax3.setZValue(-10000)
             self.ax3.setLabel("Listings", color="#ff00ff")
+            # self.ax3.hideAxis()
 
             self.updateViews()
             self.p1.vb.sigResized.connect(self.updateViews)
 
         @Slot()
         def updateViews(self) -> None:
-            # self.p2.setGeometry(self.plotItem.vb.sceneBoundingRect())
-            # self.p3.setGeometry(self.plotItem.vb.sceneBoundingRect())
-            # # self.p2.linkedViewChanged(self.plotItem.vb, self.p2.XAxis)
-            # # self.p3.linkedViewChanged(self.plotItem.vb, self.p3.XAxis)
-            # # self.enableAutoRange(axis="xy")
-            # # self.setAutoVisible(y=True)
             self.p2.setGeometry(self.p1.vb.sceneBoundingRect())
             self.p3.setGeometry(self.p1.vb.sceneBoundingRect())
-
-            ## need to re-update linked axes since this was called
-            ## incorrectly while views had different shapes.
-            ## (probably this should be handled in ViewBox.resizeEvent)
             self.p2.linkedViewChanged(self.p1.vb, self.p2.XAxis)
             self.p3.linkedViewChanged(self.p1.vb, self.p3.XAxis)
 
@@ -362,6 +329,14 @@ class MainWindow(QMainWindow):
         self.refreshing_table = True
 
         self.main_widget = QWidget()
+
+        self.menu_bar = QMenuBar(self)
+        self.setMenuBar(self.menu_bar)
+        self.item_cleaner_action = QWidgetAction(self)
+        self.item_cleaner_action.setText("Item Cleaner")
+        self.menu_bar.addAction(self.item_cleaner_action)
+        self.item_cleaner_action.triggered.connect(self.on_item_cleaner_menu_clicked)
+
         self.main_layout = QVBoxLayout()
         self.centre_splitter = QSplitter()
         self.left_splitter = QSplitter()
@@ -403,9 +378,7 @@ class MainWindow(QMainWindow):
         )
 
         self.retainer_table = MainWindow.RetainerTable(self, self.seller_id)
-        self.retainer_table.cellDoubleClicked.connect(
-            self.on_retainer_table_double_clicked
-        )
+        self.retainer_table.cellClicked.connect(self.on_retainer_table_clicked)
         self.right_splitter.addWidget(self.retainer_table)
 
         self.price_graph = MainWindow.PriceGraph(self)
@@ -428,10 +401,10 @@ class MainWindow(QMainWindow):
         self.worker_thread = QThread(self)
         self.worker = Worker(
             classjob_level_max_dict={
-                8: 70,
-                9: 70,
+                8: 71,
+                9: 71,
                 10: 69,
-                11: 78,
+                11: 79,
                 12: 70,
                 13: 73,
                 14: 70,
@@ -472,6 +445,11 @@ class MainWindow(QMainWindow):
         self.retainerworker_thread.start()
         self.load_retainer_worker_cache()
 
+    @Slot()
+    def on_item_cleaner_menu_clicked(self) -> None:
+        form = ItemCleanerForm(self, self.worker.get_item_crafting_value_table)
+        form.show()
+
     def load_retainer_worker_cache(self) -> None:
         try:
             listings_list: List[Listings] = [
@@ -495,7 +473,7 @@ class MainWindow(QMainWindow):
         universalis_mutex.unlock()
 
     @Slot(int, int)
-    def on_retainer_table_double_clicked(self, row: int, column: int):
+    def on_retainer_table_clicked(self, row: int, column: int):
         for row_group_list in self.retainer_table.table_data.values():
             for widget_list in row_group_list:
                 if widget_list[0].row() != row:
@@ -584,20 +562,7 @@ class MainWindow(QMainWindow):
                 symbolBrush=("m"),
             ),
         )
-        # p3.setLogMode(False, True)
         self.price_graph.auto_range()
-        # self.price_graph.p3.enableAutoRange(axis="xy")
-        # self.price_graph.p3.updateAutoRange()
-        # self.price_graph.plotItem.vb.autoRange()
-        # self.price_graph.plotItem.vb.enableAutoRange()
-        # self.price_graph.p3.autoRange(item=p3)
-        # self.price_graph.p3.enableAutoRange(self.price_graph.p3, True, True)
-
-        # self.price_graph.plotItem.vb.enableAutoRange(
-        #     self.price_graph.plotItem, True, True
-        # )
-        # self.price_graph.plotItem.vb.enableAutoRange(self.price_graph.p2, True, True)
-        # self.price_graph.plotItem.vb.enableAutoRange(self.price_graph.p3, True, True)
 
     @Slot()
     def on_refresh_button_clicked(self):

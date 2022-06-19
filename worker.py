@@ -4,7 +4,7 @@ from PySide6.QtCore import Slot, Signal, QSize, QObject, QMutex, QSemaphore, QTh
 from ff14marketcalc import get_profit
 from universalis.universalis import get_listings, universalis_mutex
 
-from xivapi.models import ClassJob, Recipe, RecipeCollection
+from xivapi.models import ClassJob, Item, Recipe, RecipeCollection
 from universalis.models import Listing, Listings
 from xivapi.xivapi import get_classjob_doh_list, get_recipes, xivapi_mutex
 
@@ -14,6 +14,7 @@ class Worker(QObject):
     table_refresh_signal = Signal()
     retainer_listings_changed = Signal(Listings)
     refresh_recipe_request_sem = QSemaphore()
+    crafting_value_table_changed = Signal(dict)
 
     def __init__(
         self, world: int, seller_id: str, classjob_level_max_dict: Dict[int, int] = {}
@@ -28,8 +29,8 @@ class Worker(QObject):
         self._processed_recipe_list_mutex = QMutex()
         self._table_row_data: List[Tuple[str, str, float, float, Recipe]] = []
         self._table_row_data_mutex = QMutex()
-        # self._retainer_listings_list: List[Listings] = []
-        # self._retainer_listings_list_mutex = QMutex()
+        self._item_crafting_value_table: Dict[int, float] = {}
+        self._item_crafting_value_table_mutex = QMutex()
 
         self.running = True
 
@@ -46,6 +47,16 @@ class Worker(QObject):
         r = copy(self._table_row_data)
         self._table_row_data_mutex.unlock()
         return r
+
+    @property
+    def item_crafting_value_table(self):
+        self._item_crafting_value_table_mutex.lock()
+        r = copy(self._item_crafting_value_table)
+        self._item_crafting_value_table_mutex.unlock()
+        return r
+
+    def get_item_crafting_value_table(self) -> Dict[int, float]:
+        return self.item_crafting_value_table
 
     def refresh_listings(self, recipe_list: List[Recipe]) -> None:
         for recipe_index, recipe in enumerate(recipe_list):
@@ -82,6 +93,43 @@ class Worker(QObject):
         self._table_row_data.sort(key=lambda row: row[2] * row[3], reverse=True)
         self._table_row_data_mutex.unlock()
         self.table_refresh_signal.emit()
+
+    def update_item_values(self, recipe_collection: RecipeCollection) -> None:
+        def update_crafting_value_table(
+            recipe: Recipe, crafting_value_table: Dict[int, float]
+        ):
+            for ingredient_index in range(9):
+                quantity: int = getattr(recipe, f"AmountIngredient{ingredient_index}")
+                item: Item = getattr(recipe, f"ItemIngredient{ingredient_index}")
+                if not item:
+                    break
+                crafting_value_table[item.ID] = crafting_value_table.setdefault(
+                    item.ID, 0
+                ) + (
+                    quantity
+                    * float(item.LevelItem)
+                    / self.classjob_level_max_dict[recipe.ClassJob.ID]
+                )
+                ingredient_recipes = getattr(
+                    recipe, f"ItemIngredientRecipe{ingredient_index}"
+                )
+                if ingredient_recipes:
+                    # take the recipe from the lowest level class
+                    ingredient_recipe = min(
+                        ingredient_recipes,
+                        key=lambda ingredient_recipe: self.classjob_level_max_dict[
+                            ingredient_recipe.ClassJob.ID
+                        ],
+                    )
+                    update_crafting_value_table(ingredient_recipe, crafting_value_table)
+
+        self._item_crafting_value_table_mutex.lock()
+        self._item_crafting_value_table.clear()
+        recipe: Recipe
+        for recipe in recipe_collection:
+            update_crafting_value_table(recipe, self._item_crafting_value_table)
+        self._item_crafting_value_table_mutex.unlock()
+        self.crafting_value_table_changed.emit(self._item_crafting_value_table)
 
     def run(self):
         self.print_status("Getting DOH Classjob list")
@@ -134,6 +182,10 @@ class Worker(QObject):
                     break
                 else:
                     self.service_requests()
+            if not downloading_recipes or not self.running:
+                break
+            self.print_status("Updating Crafting item value weights")
+            self.update_item_values(self._processed_recipe_list)
             if not downloading_recipes or not self.running:
                 break
             self.refresh_listings(self._processed_recipe_list)

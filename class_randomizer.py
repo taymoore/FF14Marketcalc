@@ -9,12 +9,11 @@ def class_randomizer(
         "Dan": [("", "dps"), ("", "tank"), ("", "healer")],
         "Katie": [
             ("", "tank"),
-            # ("", "healer"),
-            ("", "dps"),
-        ],  #
+            # ("", "dps"),
+        ],
         "Kai": [("", "dps"), ("", "tank"), ("", "healer")],
-        # "Taylor": [("", "dps"), ("", "tank"), ("", "healer")],
-        "Helen": [("", "dps")],  # , ("", "tank"), ("", "healer")
+        "Taylor": [("", "dps"), ("", "tank"), ("", "healer")],
+        # "Helen": [("", "dps")],  # , ("", "tank"), ("", "healer")
         # "Dan": [("Blm", "dps"), ("Drk", "tank"), ("Rpr", "dps")],  # ("Whm", "healer"),
         # "Katie": [("Nnj", "dps"), ("War", "tank")],  # ("Rpr", "dps"),
         # # "Helen": [("Brd", "dps"), ("Whm", "healer")],
