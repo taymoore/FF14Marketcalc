@@ -1,4 +1,5 @@
 import json
+import logging
 import signal
 from scipy.signal import savgol_filter
 from scipy import stats
@@ -55,6 +56,8 @@ from xivapi.xivapi import (
     xivapi_mutex,
 )
 from xivapi.xivapi import save_to_disk as xivapi_save_to_disk
+
+_logger = logging.getLogger(__name__)
 
 world_id = 55
 
@@ -412,13 +415,13 @@ class MainWindow(QMainWindow):
         self.worker = Worker(
             classjob_level_max_dict={
                 8: 71,
-                9: 71,
+                9: 72,
                 10: 69,
                 11: 79,
-                12: 70,
-                13: 73,
-                14: 70,
-                15: 67,
+                12: 71,
+                13: 74,
+                14: 71,
+                15: 69,
             },
             world=world_id,
             seller_id=self.seller_id,
@@ -562,23 +565,30 @@ class MainWindow(QMainWindow):
                 ),
             )
 
-        if listings.listing_history.index.size > 2:
-            df = listings.listing_history[
+        if (
+            listings.listing_history.index.size > 2
+            and listings.listing_history["Price"].max()
+            - listings.listing_history["Price"].min()
+            > 0
+        ):
+            listing_history_df = listings.listing_history[
                 (np.abs(stats.zscore(listings.listing_history)) < 3).all(axis=1)
             ]
-            if df.index.size != listings.listing_history.index.size:
-                print("Ignoring outliers:")
-                print(
+            if listing_history_df.index.size != listings.listing_history.index.size:
+                _logger.info("Ignoring outliers:")
+                _logger.info(
                     listings.listing_history.loc[
-                        listings.listing_history.index.difference(df.index)
+                        listings.listing_history.index.difference(
+                            listing_history_df.index
+                        )
                     ]["Price"]
                 )
         else:
-            df = listings.listing_history
+            listing_history_df = listings.listing_history
         self.price_graph.p3.addItem(
             p3 := PlotDataItem(
-                np.asarray(df.index),
-                df["Price"].values,
+                np.asarray(listing_history_df.index),
+                listing_history_df["Price"].values,
                 pen="m",
                 symbol="o",
                 symbolSize=5,

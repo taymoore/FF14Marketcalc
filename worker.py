@@ -85,8 +85,10 @@ class Worker(QObject):
                 (
                     recipe.ClassJob.Abbreviation,
                     recipe.ItemResult.Name,
-                    get_profit(recipe, self.world),
-                    get_listings(recipe.ItemResult.ID, self.world).regularSaleVelocity,
+                    get_profit(recipe, self.world, refresh_cache=False),
+                    get_listings(
+                        recipe.ItemResult.ID, self.world, cache_timeout_s=3600 * 24
+                    ).regularSaleVelocity,
                     recipe,
                 )
             )

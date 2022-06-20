@@ -18,7 +18,7 @@ get_content_time = time.time() - GET_CONTENT_RATE
 
 universalis_mutex = QMutex()
 
-CACHE_TIMEOUT_S = 3600
+CACHE_TIMEOUT_S = 3600 * 2
 CACHE_FILENAME = "listings.json"
 
 cache: Dict[Any, Tuple[Listings, float]]

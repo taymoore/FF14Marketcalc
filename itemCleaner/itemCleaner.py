@@ -36,7 +36,7 @@ class ItemCleanerForm(QDialog):
             self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
             self.verticalHeader().hide()
             self.setEditTriggers(QAbstractItemView.NoEditTriggers)
-            self.setMinimumSize(QSize(300, 1000))
+            self.setMinimumSize(QSize(500, 1000))
             self.table_data: Dict[int, List[QTableWidgetItem]] = {}
 
         def clear_contents(self) -> None:
@@ -47,6 +47,7 @@ class ItemCleanerForm(QDialog):
         def add_row(self, item_id: int, name: str, crafting_value: float):
             row_widgets: List[QTableWidgetItem] = []
             row_widgets.append(QTableWidgetItem(name))
+            # Sort numerically: https://stackoverflow.com/questions/25533140/sorting-qtablewidget-items-numerically
             row_widgets.append(QTableWidgetItem(f"{crafting_value:.1f}"))
             universalis_mutex.lock()
             listings = get_listings(item_id, 55)
