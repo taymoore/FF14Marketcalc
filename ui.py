@@ -236,7 +236,7 @@ class MainWindow(QMainWindow):
             self.p1.getAxis("right").linkToView(self.p2)
             self.p2.setXLink(self.p1)
             self.p1.getAxis("right").setLabel("Purchases", color="#00ff00")
-            # self.p1.vb.setLogMode("y", True)
+            # # self.p1.vb.setLogMode("y", True)
             # self.p2.setLogMode(self.p1.getAxis("right"), True)
             # self.p1.getAxis("right").setLogMode(False, True)
             # self.p1.getAxis("right").enableAutoSIPrefix(False)

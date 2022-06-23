@@ -58,7 +58,10 @@ def get_content(content_name: str, t: R):
             print(str(e))
         else:
             break
-    return t.parse_obj(content_response.json())
+    if content_response is not None:
+        return t.parse_obj(content_response.json())
+    else:
+        raise RuntimeError("Failed to get content")
 
 
 def _get_item(item_id: int) -> Item:

@@ -66,8 +66,12 @@ class RetainerWorker(QObject):
                 listing.sellerID == self.seller_id
                 for listing in listing_data.listings.listings
             ):
-                self.update_listing_data(listing_data)
-                self.listing_data_updated.emit(listing_data)
+                try:
+                    self.update_listing_data(listing_data)
+                except Exception as e:
+                    _logger.error(str(e))
+                else:
+                    self.listing_data_updated.emit(listing_data)
             else:
                 listing_data.timer.stop()
                 del self.table_data[event.timerId()]
