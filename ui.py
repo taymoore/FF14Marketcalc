@@ -1,5 +1,7 @@
+from copy import copy
 import json
 import logging
+from msilib.schema import Class
 import signal
 from scipy.signal import savgol_filter
 from scipy import stats
@@ -28,6 +30,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QMenuBar,
     QWidgetAction,
+    QSpinBox,
 )
 from pyqtgraph import (
     PlotWidget,
@@ -40,6 +43,8 @@ from pyqtgraph import (
     functions,
     mkPen,
 )
+from cache import PersistMapping
+from classjobConfig import ClassJobConfig
 from ff14marketcalc import get_profit, print_recipe
 from itemCleaner.itemCleaner import ItemCleanerForm
 from retainerWorker.models import ListingData
@@ -48,7 +53,7 @@ from worker import Worker
 from retainerWorker.retainerWorker import RetainerWorker
 from universalis.universalis import get_listings, universalis_mutex
 from universalis.universalis import save_to_disk as universalis_save_to_disk
-from xivapi.models import Recipe, RecipeCollection
+from xivapi.models import ClassJob, Recipe, RecipeCollection
 from xivapi.xivapi import (
     get_classjob_doh_list,
     get_recipes,
@@ -334,6 +339,30 @@ class MainWindow(QMainWindow):
                 ev.accept()
                 vb.sigRangeChangedManually.emit(mask)
 
+    # class JobLevelWidget(QWidget):
+    #     def __init__(self, parent: Optional[QWidget] = ..., f: Qt.WindowFlags = ...) -> None:
+    #         super().__init__(parent, f)
+
+    class ClassJobLevelLayout(QHBoxLayout):
+        joblevel_value_changed = Signal(int, int)
+
+        def __init__(self, parent: QWidget, classjob_config: ClassJobConfig) -> None:
+            self.classjob = ClassJob(**classjob_config.dict())
+            super().__init__()
+            self.label = QLabel(parent)
+            self.label.setText(classjob_config.Abbreviation)
+            self.addWidget(self.label)
+            self.spinbox = QSpinBox(parent)
+            self.spinbox.setMaximum(70)
+            self.spinbox.setValue(classjob_config.level)
+            self.addWidget(self.spinbox)
+
+            self.spinbox.valueChanged.connect(self.on_spinbox_value_changed)
+
+        def on_spinbox_value_changed(self, value: int) -> None:
+            _logger.debug(f"{self.classjob.Abbreviation} level changed to {value}")
+            self.joblevel_value_changed.emit(self.classjob.ID, value)
+
     retainer_listings_changed = Signal(Listings)
 
     def __init__(self):
@@ -351,6 +380,8 @@ class MainWindow(QMainWindow):
         self.item_cleaner_action.triggered.connect(self.on_item_cleaner_menu_clicked)
 
         self.main_layout = QVBoxLayout()
+        self.classjob_level_layout = QHBoxLayout()
+        self.main_layout.addLayout(self.classjob_level_layout)
         self.centre_splitter = QSplitter()
         self.left_splitter = QSplitter()
         self.left_splitter.setOrientation(Qt.Orientation.Vertical)
@@ -408,21 +439,46 @@ class MainWindow(QMainWindow):
 
         self.setMinimumSize(QSize(1000, 600))
 
-        # classjob_list = get_classjob_doh_list()
+        # Classjob level stuff!
+        _logger.info("Getting classjob list...")
+        classjob_list: List[ClassJob] = get_classjob_doh_list()
+        self.classjob_config = PersistMapping[int, ClassJobConfig](
+            ClassJobConfig,
+            "classjob_config.json",
+            {
+                classjob.ID: ClassJobConfig(**classjob.dict(), level=0)
+                for classjob in classjob_list
+            },
+        )
+        self.classjob_level_layout_list = []
+        for classjob_config in self.classjob_config.values():
+            self.classjob_level_layout_list.append(
+                _classjob_level_layout := MainWindow.ClassJobLevelLayout(
+                    self, classjob_config
+                )
+            )
+            self.classjob_level_layout.addLayout(_classjob_level_layout)
+            _classjob_level_layout.joblevel_value_changed.connect(
+                self.on_classjob_level_value_changed
+            )
 
         # https://realpython.com/python-pyqt-qthread/
         self.worker_thread = QThread(self)
         self.worker = Worker(
             classjob_level_max_dict={
-                8: 71,
-                9: 72,
-                10: 69,
-                11: 79,
-                12: 71,
-                13: 74,
-                14: 71,
-                15: 69,
+                classjob_config.ID: classjob_config.level
+                for classjob_config in self.classjob_config.values()
             },
+            # classjob_level_max_dict={
+            #     8: 71,
+            #     9: 72,
+            #     10: 69,
+            #     11: 79,
+            #     12: 71,
+            #     13: 74,
+            #     14: 71,
+            #     15: 69,
+            # },
             world=world_id,
             seller_id=self.seller_id,
         )
@@ -457,6 +513,15 @@ class MainWindow(QMainWindow):
         self.worker_thread.start()
         self.retainerworker_thread.start()
         self.load_retainer_worker_cache()
+
+    @Slot(int, int)
+    def on_classjob_level_value_changed(
+        self, classjob_id: int, classjob_level: int
+    ) -> None:
+        classjob_config = self.classjob_config[classjob_id]
+        classjob_config.level = classjob_level
+        self.classjob_config[classjob_id] = classjob_config
+        _logger.debug(f"updated {classjob_id} with {classjob_level}")
 
     @Slot()
     def on_item_cleaner_menu_clicked(self) -> None:
@@ -621,6 +686,7 @@ class MainWindow(QMainWindow):
         self.worker_thread.wait()
         self.retainerworker_thread.quit()
         self.retainerworker_thread.wait()
+        self.classjob_config.save_to_disk()
         universalis_save_to_disk()
         xivapi_save_to_disk()
         self.retainerworker.save_cache()

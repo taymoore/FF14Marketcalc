@@ -1,9 +1,17 @@
+import abc
+from ast import Call
+from copy import deepcopy
 from functools import partial, wraps
+from pathlib import Path
 from typing import (
     Any,
     Callable,
+    ClassVar,
     Dict,
+    Generic,
+    Iterator,
     List,
+    MutableMapping,
     Optional,
     Tuple,
     Type,
@@ -28,7 +36,7 @@ class Persist:
         self,
         func: Callable,
         filename: str,
-        cache_timeout_s: float,
+        cache_timeout_s: Optional[float],
         return_type: Union[BaseCollectionModel, BaseModel],
     ) -> None:
         self.timeout_s = cache_timeout_s
@@ -65,11 +73,9 @@ class Persist:
         except Exception as e:
             print(str(e))
 
-    def __call__(
-        self, *args: Any, cache_timeout_s: Optional[float] = None, **kwargs: Any
-    ) -> Any:
+    def __call__(self, *args: Any, cache_timeout_s: float = ..., **kwargs: Any) -> Any:
         _cache_timeout_s = (
-            cache_timeout_s if cache_timeout_s is not None else self.timeout_s
+            cache_timeout_s if cache_timeout_s is not ... else self.timeout_s
         )
         if args is None:
             _args: Union[List[Any], str] = []
@@ -84,9 +90,9 @@ class Persist:
                     logging.DEBUG,
                     f"Age of {self.filename} Cache: {time.time() - self.cache['null'][1]}s",
                 )
-            if (
-                len(self.cache) == 0
-                or time.time() - self.cache["null"][1] > _cache_timeout_s
+            if len(self.cache) == 0 or (
+                _cache_timeout_s is not None
+                and time.time() - self.cache["null"][1] > _cache_timeout_s
             ):
                 self.cache["null"] = (self.func(), time.time())
             _args = "null"
@@ -96,13 +102,153 @@ class Persist:
                     logging.DEBUG,
                     f"Age of {self.filename}->{_args} Cache: {time.time() - self.cache[str(_args)][1]}s",
                 )
-            if (
-                str(_args) not in self.cache
-                or time.time() - self.cache[str(_args)][1] > _cache_timeout_s
+            if str(_args) not in self.cache or (
+                _cache_timeout_s is not None
+                and time.time() - self.cache[str(_args)][1] > _cache_timeout_s
             ):
                 self.cache[str(_args)] = (self.func(*_args), time.time())
 
         return self.cache[str(_args)][0]
+
+
+KT = TypeVar("KT")
+VT = TypeVar("VT", bound=BaseModel)
+
+
+# https://stackoverflow.com/a/64323140/7552308
+class PersistMapping(MutableMapping[KT, VT]):
+    # Cannot get type argument at runtime https://stackoverflow.com/questions/57706180/generict-base-class-how-to-get-type-of-t-from-within-instance
+    def __init__(
+        self, value_type: VT, filename: str, default: Dict[KT, VT] = dict(), **kwargs
+    ) -> None:
+        self.filename = filename
+        self.data = default
+        if kwargs:
+            self.update(kwargs)
+        if Path(f".data/{self.filename}").exists():
+            try:
+                self.data.update(
+                    {
+                        param: value_type.parse_obj(value)
+                        for param, value in json.load(
+                            open(f".data/{self.filename}", "r")
+                        ).items()
+                    }
+                )
+            except (IOError, ValueError):
+                _logger.log(logging.WARN, f"Error loading {self.filename} cache")
+        else:
+            _logger.info(f"Created new {self.filename} cache")
+
+    def __contains__(self, key: KT) -> bool:
+        return key in self.data
+
+    def __delitem__(self, key: KT) -> None:
+        del self.data[key]
+
+    def __getitem__(self, key: KT) -> VT:
+        if key in self.data:
+            return self.data[key]
+        raise KeyError(key)
+
+    def __len__(self) -> int:
+        return len(self.data)
+
+    def __iter__(self) -> Iterator[KT]:
+        return iter(self.data)
+
+    def __setitem__(self, key: KT, value: VT) -> None:
+        self.data[key] = value
+
+    def update(self, other=(), /, **kwds) -> None:
+        """Updates the dictionary from an iterable or mapping object."""
+        if isinstance(other, abc.Mapping):
+            for key in other:
+                self.data[key] = other[key]
+        elif hasattr(other, "keys"):
+            for key in other.keys():
+                self.data[key] = other[key]
+        else:
+            for key, value in other:
+                self.data[key] = value
+        for key, value in kwds.items():
+            self.data[key] = value
+
+    def save_to_disk(self) -> None:
+        data: Dict[KT, dict] = {key: value.dict() for key, value in self.data.items()}
+        json.dump(data, open(f".data/{self.filename}", "w"), indent=2)
+
+
+# class PersistTimeoutMapping(MutableMapping[KT, VT]):
+#     def __init__(
+#         self,
+#         value_type: VT,
+#         filename: str,
+#         timeout_s: float,
+#         default: Dict[KT, VT] = dict(),
+#     ) -> None:
+#         self.filename = filename
+#         self.timeout_s = timeout_s
+#         self.data: Dict[KT, List[VT, float]] = {
+#             key: [value, time.time()] for key, value in default.items()
+#         }
+#         if Path(f".data/{self.filename}").exists():
+#             try:
+#                 self.data.update(
+#                     {
+#                         param: [value_type.parse_obj(value[0]), value[1]]
+#                         for param, value in json.load(
+#                             open(f".data/{self.filename}", "r")
+#                         ).items()
+#                     }
+#                 )
+#             except (IOError, ValueError):
+#                 _logger.log(logging.WARN, f"Error loading {self.filename} cache")
+#         else:
+#             _logger.info(f"Created new {self.filename} cache")
+
+#     def __contains__(self, key: KT) -> bool:
+#         return key in self.data
+
+#     def __delitem__(self, key: KT) -> None:
+#         del self.data[key]
+
+#     def get(self, key: KT, timeout_s: float = ..., default: Optional[VT] = ...) -> VT:
+#         if timeout_s is ...:
+#             timeout_s = self.timeout_s
+#         if key in self.data:
+#             if time.time() - self.data[key][1] > timeout_s:
+#                 del self.data[key]
+#             else:
+#                 return self.data[key][0]
+
+#     def __getitem__(self, key: KT) -> VT:
+#         if key in self.data:
+#             return self.data[key][0]
+#         raise KeyError(key)
+
+#     def __len__(self) -> int:
+#         return len(self.data)
+
+#     def __setitem__(self, key: KT, value: VT) -> None:
+#         self.data[key] = [value, time.time()]
+
+#     def update(self, other=()) -> None:
+#         if isinstance(other, abc.Mapping):
+#             for key in other:
+#                 self.data[key] = [other[key], time.time()]
+#         elif hasattr(other, "keys"):
+#             for key in other.keys():
+#                 self.data[key] = [other[key], time.time()]
+#         else:
+#             for key, value in other:
+#                 self.data[key] = [value, time.time()]
+
+#     def save_to_disk(self) -> None:
+#         data: Dict[KT, List[dict, float]] = {
+#             key: [value[0].dict(), value[1]] for key, value in self.data.items()
+#         }
+#         json.dump(data, open(f".data/{self.filename}", "w"), indent=2)
 
 
 def persist_to_file(file_name: str, timeout_s: float, return_type: BaseCollectionModel):

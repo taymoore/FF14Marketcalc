@@ -15,8 +15,8 @@ class ClassJob(BaseModel):
     Abbreviation: str
     ClassJobCategory: Union[int, ClassJobCategory]
 
-    class Config:
-        frozen = True
+    # class Config:
+    #     frozen = True
 
 
 class ClassJobCollection(BaseCollectionModel[ClassJob]):
