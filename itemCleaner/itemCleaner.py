@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
 )
 from pydantic import BaseModel
-from universalis.universalis import get_listings, universalis_mutex
+from universalis.universalis import get_listings
 
 from xivapi.xivapi import get_item
 
@@ -49,9 +49,7 @@ class ItemCleanerForm(QDialog):
             row_widgets.append(QTableWidgetItem(name))
             # Sort numerically: https://stackoverflow.com/questions/25533140/sorting-qtablewidget-items-numerically
             row_widgets.append(QTableWidgetItem(f"{crafting_value:.1f}"))
-            universalis_mutex.lock()
             listings = get_listings(item_id, 55)
-            universalis_mutex.unlock()
             row_widgets.append(
                 QTableWidgetItem(
                     f"{listings.minPrice - listings.history['Price'].mean():.1f}"

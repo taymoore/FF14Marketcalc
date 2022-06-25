@@ -3,6 +3,7 @@ from ast import Call
 from copy import deepcopy
 from functools import partial, wraps
 from pathlib import Path
+import pickle
 from typing import (
     Any,
     Callable,
@@ -25,6 +26,7 @@ import time
 import json, atexit
 from pydantic import BaseModel
 from pydantic_collections import BaseCollectionModel
+from PySide6.QtCore import QMutex
 
 _logger = logging.getLogger(__name__)
 
@@ -38,11 +40,13 @@ class Persist:
         filename: str,
         cache_timeout_s: Optional[float],
         return_type: Union[BaseCollectionModel, BaseModel],
+        mutex: bool = True,
     ) -> None:
         self.timeout_s = cache_timeout_s
         self.func = func  # type: ignore
         self.filename = filename
         self.return_type = return_type
+        self.mutex = QMutex() if mutex else None
         try:
             self.cache: Dict[Any, Tuple[BaseModel, float]] = {
                 param: (
@@ -84,6 +88,8 @@ class Persist:
         for kwarg_value in kwargs.values():
             _args.append(kwarg_value)
 
+        if self.mutex is not None:
+            self.mutex.lock()
         if len(_args) == 0:
             if len(self.cache) > 0:
                 _logger.log(
@@ -108,37 +114,37 @@ class Persist:
             ):
                 self.cache[str(_args)] = (self.func(*_args), time.time())
 
-        return self.cache[str(_args)][0]
+        data = self.cache[str(_args)][0]
+        if self.mutex is not None:
+            self.mutex.unlock()
+        return data
 
 
 KT = TypeVar("KT")
-VT = TypeVar("VT", bound=BaseModel)
+VT = TypeVar("VT")
 
 
 # https://stackoverflow.com/a/64323140/7552308
 class PersistMapping(MutableMapping[KT, VT]):
     # Cannot get type argument at runtime https://stackoverflow.com/questions/57706180/generict-base-class-how-to-get-type-of-t-from-within-instance
     def __init__(
-        self, value_type: VT, filename: str, default: Dict[KT, VT] = dict(), **kwargs
+        self,
+        filename: str,
+        default: Optional[Dict[KT, VT]] = None,
+        **kwargs,
     ) -> None:
-        self.filename = filename
-        self.data = default
+        self.data = default if default is not None else {}
         if kwargs:
             self.update(kwargs)
-        if Path(f".data/{self.filename}").exists():
+        self.file_path = Path(f".data/{filename}")
+        if self.file_path.exists():
             try:
-                self.data.update(
-                    {
-                        param: value_type.parse_obj(value)
-                        for param, value in json.load(
-                            open(f".data/{self.filename}", "r")
-                        ).items()
-                    }
-                )
+                with self.file_path.open("rb") as f:
+                    self.data.update(pickle.load(f))
             except (IOError, ValueError):
-                _logger.log(logging.WARN, f"Error loading {self.filename} cache")
+                _logger.log(logging.WARN, f"Error loading {self.file_path} cache")
         else:
-            _logger.info(f"Created new {self.filename} cache")
+            _logger.info(f"Created new {self.file_path} cache")
 
     def __contains__(self, key: KT) -> bool:
         return key in self.data
@@ -175,8 +181,8 @@ class PersistMapping(MutableMapping[KT, VT]):
             self.data[key] = value
 
     def save_to_disk(self) -> None:
-        data: Dict[KT, dict] = {key: value.dict() for key, value in self.data.items()}
-        json.dump(data, open(f".data/{self.filename}", "w"), indent=2)
+        with self.file_path.open("wb") as f:
+            pickle.dump(self.data, f)
 
 
 # class PersistTimeoutMapping(MutableMapping[KT, VT]):

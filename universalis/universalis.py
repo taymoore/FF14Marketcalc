@@ -79,7 +79,9 @@ def _get_listings(id: int, world: Union[int, str]) -> Listings:
     content_response = requests.get(url)
     while content_response.status_code != 200:
         time.sleep(0.05)
-        _logger.log(logging.WARN, f"Error code {content_response.status_code}")
+        _logger.log(
+            logging.WARN, f"Error code {content_response.status_code} with url {url}"
+        )
         content_response = requests.get(url)
     content_response.raise_for_status()
     return Listings.parse_obj(content_response.json())
@@ -93,6 +95,7 @@ def get_listings(
     )
     _args = [id, world]
 
+    universalis_mutex.lock()
     if str(_args) in cache:
         _logger.log(
             logging.DEBUG,
@@ -120,10 +123,14 @@ def get_listings(
             len(listings.history.index) > 0
             and listings.history.index.max() != listings.history.index.min()
         ):
-            listings.regularSaleVelocity = (
-                3600 * 24 * 7 * len(listings.history.index)
-            ) / (listings.history.index.max() - listings.history.index.min())
+            listings.regularSaleVelocity = min(
+                (3600 * 24 * 7 * len(listings.history.index))
+                / (listings.history.index.max() - listings.history.index.min()),
+                listings.regularSaleVelocity,
+            )
 
         cache[str(_args)] = (listings, time.time())
 
-    return cache[str(_args)][0]
+    data = cache[str(_args)][0]
+    universalis_mutex.unlock()
+    return data
