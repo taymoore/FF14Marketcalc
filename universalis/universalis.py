@@ -1,15 +1,16 @@
 import json
 import pickle
-from typing import Any, Dict, Optional, Tuple, TypeVar, Union
+from typing import Any, Dict, List, Optional, Tuple, TypeVar, Union
 import logging
 import time
 import pandas as pd
 from pydantic import BaseModel
 import requests
-from PySide6.QtCore import QMutex
+from PySide6.QtCore import QMutex, Signal
 from cache import Persist, persist_to_file
 
 from universalis.models import Listings
+from xivapi.models import Item, Recipe
 
 _logger = logging.getLogger(__name__)
 
@@ -76,32 +77,58 @@ def _get_listings(id: int, world: Union[int, str]) -> Listings:
     if now_time - get_content_time < GET_CONTENT_RATE:
         time.sleep(GET_CONTENT_RATE - now_time + get_content_time)
     get_content_time = time.time()
-    for _ in range(10):
-        try:
-            content_response = requests.get(url)
-            while content_response.status_code != 200:
-                time.sleep(0.05)
-                _logger.log(logging.WARN, f"Error code {content_response.status_code}")
-                content_response = requests.get(url)
-            content_response.raise_for_status()
-        except Exception as e:
-            print(str(e))
-        else:
-            break
-    if content_response is not None:
-        return Listings.parse_obj(content_response.json())
-    else:
-        raise RuntimeError("Failed to get listings")
+    content_response = requests.get(url)
+    while content_response.status_code != 200:
+        time.sleep(0.05)
+        _logger.log(
+            logging.WARN, f"Error code {content_response.status_code} with url {url}"
+        )
+        content_response = requests.get(url)
+    content_response.raise_for_status()
+    return Listings.parse_obj(content_response.json())
+
+
+seller_id = None
+
+
+def set_seller_id(id: str) -> None:
+    global seller_id
+    seller_id = id
+
+
+def seller_id_in_listings(listings: Listings) -> bool:
+    global seller_id
+    return seller_id is not None and any(
+        listing.sellerID == seller_id for listing in listings.listings
+    )
+
+
+def seller_id_in_recipe(recipe: Recipe, world_id: int) -> List[Listings]:
+    global seller_id
+    listings_list = []
+    listings = get_listings(recipe.ItemResult.ID, world_id)
+    if seller_id_in_listings(listings):
+        listings_list.append(listings)
+    for ingredient_index in range(9):
+        item: Item = getattr(recipe, f"ItemIngredient{ingredient_index}")
+        if item is not None:
+            listings = get_listings(item.ID, world_id)
+            if seller_id_in_listings(listings):
+                listings_list.append(listings)
+    return listings_list
 
 
 def get_listings(
-    id: int, world: Union[int, str], cache_timeout_s: Optional[float] = None
+    id: int,
+    world: Union[int, str],
+    cache_timeout_s: Optional[float] = None,
 ) -> Listings:
     _cache_timeout_s = (
         cache_timeout_s if cache_timeout_s is not None else CACHE_TIMEOUT_S
     )
     _args = [id, world]
 
+    universalis_mutex.lock()
     if str(_args) in cache:
         _logger.log(
             logging.DEBUG,
@@ -110,13 +137,13 @@ def get_listings(
     if str(_args) not in cache or time.time() - cache[str(_args)][1] > _cache_timeout_s:
         listings = _get_listings(id, world)
 
+        # Merge history and listing_history
         if str(_args) in cache:
             listings.history = cache[str(_args)][0].history
             listings.listing_history = cache[str(_args)][0].listing_history
         else:
             listings.history = pd.DataFrame(columns=["Price"])
             listings.listing_history = pd.DataFrame(columns=["Price"])
-        # Update persistent memory items
         for recent_history_listing in listings.recentHistory:
             listings.history.loc[
                 recent_history_listing.timestamp
@@ -135,4 +162,6 @@ def get_listings(
 
         cache[str(_args)] = (listings, time.time())
 
-    return cache[str(_args)][0]
+    data = cache[str(_args)][0]
+    universalis_mutex.unlock()
+    return data

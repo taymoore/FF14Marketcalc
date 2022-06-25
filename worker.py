@@ -1,15 +1,16 @@
 from typing import Dict, List, Optional, Tuple
 from copy import copy
 from PySide6.QtCore import Slot, Signal, QSize, QObject, QMutex, QSemaphore, QThread
+from classjobConfig import ClassJobConfig
 from ff14marketcalc import get_profit
-from universalis.universalis import get_listings, universalis_mutex
+from universalis.universalis import get_listings
 
 from xivapi.models import ClassJob, Item, Recipe, RecipeCollection
 from universalis.models import Listing, Listings
-from xivapi.xivapi import get_classjob_doh_list, get_recipes, xivapi_mutex
+from xivapi.xivapi import get_classjob_doh_list, get_recipes
 
 
-class Worker(QObject):
+class Worker(QThread):
     status_bar_update_signal = Signal(str)
     table_refresh_signal = Signal()
     retainer_listings_changed = Signal(Listings)
@@ -63,9 +64,7 @@ class Worker(QObject):
             self.print_status(
                 f"Refreshing marketboard data {recipe_index+1}/{len(recipe_list)} ({recipe.ItemResult.Name})..."
             )
-            universalis_mutex.lock()
             listings: Listings = get_listings(recipe.ItemResult.ID, self.world)
-            universalis_mutex.unlock()
             if any(listing.sellerID == self.seller_id for listing in listings.listings):
                 self.retainer_listings_changed.emit(listings)
             if not self.running:
@@ -154,13 +153,11 @@ class Worker(QObject):
                     self.print_status(
                         f"Getting recipes for class {classjob.Abbreviation} level {classjob_level}..."
                     )
-                    xivapi_mutex.lock()
                     self.process_todo_recipe_list.extend(
                         get_recipes(
                             classjob_id=classjob_id, classjob_level=classjob_level
                         )
                     )
-                    xivapi_mutex.unlock()
                     self.classjob_level_current_dict[classjob_id] -= 1
                     downloading_recipes = True
                 if not self.running:
@@ -173,12 +170,10 @@ class Worker(QObject):
             recipe: Recipe
             for recipe in self.process_todo_recipe_list:
                 self.print_status(f"Worker waiting for universalis mutex")
-                universalis_mutex.lock()
                 self.print_status(
                     f"Getting recipe marketboard data for {recipe.ItemResult.Name}..."
                 )
                 get_profit(recipe, self.world)
-                universalis_mutex.unlock()
                 if not self.running:
                     downloading_recipes = False
                     break
@@ -217,3 +212,4 @@ class Worker(QObject):
     @Slot(int, int)
     def set_classjob_level(self, classjob_id: int, classjob_level: int) -> None:
         self.classjob_level_max_dict[classjob_id] = classjob_level
+        self.classjob_level_current_dict[classjob_id] = classjob_level

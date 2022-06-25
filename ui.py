@@ -1,11 +1,7 @@
 import json
 import logging
-import signal
-from scipy.signal import savgol_filter
 from scipy import stats
-from turtle import pen
 from typing import Dict, List, Optional, Tuple
-from pydantic import BaseModel
 import pandas as pd
 import numpy as np
 import pyperclip
@@ -28,6 +24,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QMenuBar,
     QWidgetAction,
+    QSpinBox,
 )
 from pyqtgraph import (
     PlotWidget,
@@ -40,24 +37,31 @@ from pyqtgraph import (
     functions,
     mkPen,
 )
+from QTableWidgetFloatItem import QTableWidgetFloatItem
+from cache import PersistMapping
+from classjobConfig import ClassJobConfig
 from ff14marketcalc import get_profit, print_recipe
 from itemCleaner.itemCleaner import ItemCleanerForm
 from retainerWorker.models import ListingData
 from universalis.models import Listings
-from worker import Worker
+from craftingWorker import CraftingWorker
 from retainerWorker.retainerWorker import RetainerWorker
-from universalis.universalis import get_listings, universalis_mutex
+from universalis.universalis import (
+    get_listings,
+    set_seller_id,
+)
 from universalis.universalis import save_to_disk as universalis_save_to_disk
-from xivapi.models import Recipe, RecipeCollection
+from xivapi.models import ClassJob, Recipe, RecipeCollection
 from xivapi.xivapi import (
     get_classjob_doh_list,
+    get_recipe_by_id,
     get_recipes,
     search_recipes,
-    xivapi_mutex,
 )
 from xivapi.xivapi import save_to_disk as xivapi_save_to_disk
 
 _logger = logging.getLogger(__name__)
+_logger.setLevel(logging.DEBUG)
 
 world_id = 55
 
@@ -75,49 +79,53 @@ class MainWindow(QMainWindow):
 
             self.setEditTriggers(QAbstractItemView.NoEditTriggers)
 
-            self.recipe_list: List[Recipe] = []
+            # recipe_id -> row
+            self.table_data: Dict[int, List[QTableWidgetItem]] = {}
 
         def clear_contents(self) -> None:
             self.clearContents()
             self.setRowCount(0)
-            self.recipe_list.clear()
+            self.table_data.clear()
 
-        def add_recipes(
-            self,
-            row_data: Optional[List[Tuple[str, str, float, float, Recipe]]] = None,
-            recipe_list: List[Recipe] = [],
-        ):
-            if row_data is None:
-                row_data = []
-            # TODO: Pass this recipe_list to the worker
-            if len(recipe_list) > 0:
-                for recipe in recipe_list:
-                    row_data.append(
-                        (
-                            recipe.ClassJob.Abbreviation,
-                            recipe.ItemResult.Name,
-                            get_profit(recipe, world_id),
-                            get_listings(
-                                recipe.ItemResult.ID, world_id
-                            ).regularSaleVelocity,
-                            recipe,
-                        )
-                    )
-                row_data.sort(key=lambda row: row[2] * row[3], reverse=True)
-            for row_index, row in enumerate(row_data):
+        def remove_rows_above_level(
+            self, classjob_id: int, classjob_level: int
+        ) -> None:
+            keys_to_remove = []
+            for recipe_id in self.table_data.keys():
+                recipe = get_recipe_by_id(recipe_id)
+                if (
+                    recipe.ClassJob.ID == classjob_id
+                    and recipe.RecipeLevelTable.ClassJobLevel > classjob_level
+                ):
+                    keys_to_remove.append(recipe_id)
+            for key in keys_to_remove:
+                self.removeRow(self.table_data[key][0].row())
+                del self.table_data[key]
+
+        @Slot(Recipe, float, float)
+        def on_recipe_table_update(
+            self, recipe: Recipe, profit: float, velocity: float
+        ) -> None:
+            if recipe.ID in self.table_data:
+                row = self.table_data[recipe.ID]
+                row[2].setText(f"{profit:,.0f}")
+                row[3].setText(f"{velocity:.2f}")
+                row[4].setText(f"{profit * velocity:,.0f}")
+            else:
+                row: List[QTableWidgetItem] = []
+                row.append(QTableWidgetFloatItem(recipe.ClassJob.Abbreviation))
+                row.append(QTableWidgetFloatItem(recipe.ItemResult.Name))
+                row.append(QTableWidgetFloatItem(f"{profit:,.0f}"))
+                row.append(QTableWidgetFloatItem(f"{velocity:.2f}"))
+                row.append(QTableWidgetFloatItem(f"{profit * velocity:,.0f}"))
                 self.insertRow(self.rowCount())
-                self.setItem(row_index, 0, QTableWidgetItem(row[0]))
-                self.setItem(row_index, 1, QTableWidgetItem(row[1]))
-                self.setItem(row_index, 2, QTableWidgetItem(f"{row[2]:,.0f}"))
-                self.setItem(
-                    row_index,
-                    3,
-                    QTableWidgetItem(f"{row[3]:.2f}"),
-                )
-                self.setItem(row_index, 4, QTableWidgetItem(f"{row[2] * row[3]:,.0f}"))
-                self.recipe_list.append(row[4])
-
-        queue_worker_task = Signal()
+                self.setItem(self.rowCount() - 1, 0, row[0])
+                self.setItem(self.rowCount() - 1, 1, row[1])
+                self.setItem(self.rowCount() - 1, 2, row[2])
+                self.setItem(self.rowCount() - 1, 3, row[3])
+                self.setItem(self.rowCount() - 1, 4, row[4])
+                self.table_data[recipe.ID] = row
+            self.sortItems(4, Qt.DescendingOrder)
 
     class RetainerTable(QTableWidget):
         def __init__(self, parent: QWidget, seller_id: int):
@@ -334,12 +342,38 @@ class MainWindow(QMainWindow):
                 ev.accept()
                 vb.sigRangeChangedManually.emit(mask)
 
+    # class JobLevelWidget(QWidget):
+    #     def __init__(self, parent: Optional[QWidget] = ..., f: Qt.WindowFlags = ...) -> None:
+    #         super().__init__(parent, f)
+
+    class ClassJobLevelLayout(QHBoxLayout):
+        joblevel_value_changed = Signal(int, int)
+
+        def __init__(self, parent: QWidget, classjob_config: ClassJobConfig) -> None:
+            self.classjob = ClassJob(**classjob_config.dict())
+            super().__init__()
+            self.label = QLabel(parent)
+            self.label.setText(classjob_config.Abbreviation)
+            self.label.setAlignment(Qt.AlignRight)
+            self.addWidget(self.label)
+            self.spinbox = QSpinBox(parent)
+            self.spinbox.setMaximum(90)
+            self.spinbox.setValue(classjob_config.level)
+            self.addWidget(self.spinbox)
+
+            self.spinbox.valueChanged.connect(self.on_spinbox_value_changed)
+
+        def on_spinbox_value_changed(self, value: int) -> None:
+            _logger.info(f"{self.classjob.Abbreviation} level changed to {value}")
+            self.joblevel_value_changed.emit(self.classjob.ID, value)
+
     retainer_listings_changed = Signal(Listings)
+    classjob_level_changed = Signal(int, int)
+    auto_refresh_listings_changed = Signal(bool)
+    search_recipes = Signal(str)
 
     def __init__(self):
         super().__init__()
-
-        self.refreshing_table = True
 
         self.main_widget = QWidget()
 
@@ -351,6 +385,8 @@ class MainWindow(QMainWindow):
         self.item_cleaner_action.triggered.connect(self.on_item_cleaner_menu_clicked)
 
         self.main_layout = QVBoxLayout()
+        self.classjob_level_layout = QHBoxLayout()
+        self.main_layout.addLayout(self.classjob_level_layout)
         self.centre_splitter = QSplitter()
         self.left_splitter = QSplitter()
         self.left_splitter.setOrientation(Qt.Orientation.Vertical)
@@ -366,9 +402,9 @@ class MainWindow(QMainWindow):
         self.search_label = QLabel(self)
         self.search_label.setText("Search:")
         self.search_layout.addWidget(self.search_label)
-        self.search_qlineedit = QLineEdit(self)
-        self.search_qlineedit.returnPressed.connect(self.on_search_return_pressed)
-        self.search_layout.addWidget(self.search_qlineedit)
+        self.search_lineedit = QLineEdit(self)
+        self.search_lineedit.returnPressed.connect(self.on_search_return_pressed)
+        self.search_layout.addWidget(self.search_lineedit)
         self.search_refresh_button = QPushButton(self)
         self.search_refresh_button.setText("Refresh")
         self.search_refresh_button.clicked.connect(self.on_refresh_button_clicked)
@@ -389,6 +425,7 @@ class MainWindow(QMainWindow):
         self.seller_id = (
             "4d9521317c92e33772cd74a166c72b0207ab9edc5eaaed5a1edb52983b70b2c2"
         )
+        set_seller_id(self.seller_id)
 
         self.retainer_table = MainWindow.RetainerTable(self, self.seller_id)
         self.retainer_table.cellClicked.connect(self.on_retainer_table_clicked)
@@ -408,33 +445,54 @@ class MainWindow(QMainWindow):
 
         self.setMinimumSize(QSize(1000, 600))
 
-        # classjob_list = get_classjob_doh_list()
+        # Classjob level stuff!
+        _logger.info("Getting classjob list...")
+        classjob_list: List[ClassJob] = get_classjob_doh_list()
+        self.classjob_config = PersistMapping[int, ClassJobConfig](
+            "classjob_config.bin",
+            {
+                classjob.ID: ClassJobConfig(**classjob.dict(), level=0)
+                for classjob in classjob_list
+            },
+        )
+        self.classjob_level_layout_list = []
+        for classjob_config in self.classjob_config.values():
+            self.classjob_level_layout_list.append(
+                _classjob_level_layout := MainWindow.ClassJobLevelLayout(
+                    self, classjob_config
+                )
+            )
+            self.classjob_level_layout.addLayout(_classjob_level_layout)
+            _classjob_level_layout.joblevel_value_changed.connect(
+                self.on_classjob_level_value_changed
+            )
 
         # https://realpython.com/python-pyqt-qthread/
-        self.worker_thread = QThread(self)
-        self.worker = Worker(
-            classjob_level_max_dict={
-                8: 71,
-                9: 72,
-                10: 69,
-                11: 79,
-                12: 71,
-                13: 74,
-                14: 71,
-                15: 69,
-            },
-            world=world_id,
-            seller_id=self.seller_id,
+        self.crafting_worker = CraftingWorker(
+            world_id=world_id,
+            classjob_config_dict=self.classjob_config,
+            # classjob_level_max_dict={
+            #     8: 71,
+            #     9: 72,
+            #     10: 69,
+            #     11: 79,
+            #     12: 71,
+            #     13: 74,
+            #     14: 71,
+            #     15: 69,
+            # },
         )
-        self.worker.moveToThread(self.worker_thread)
-        self.worker_thread.started.connect(self.worker.run)
-        self.worker_thread.finished.connect(self.worker.deleteLater)
-        self.worker_queue_recipe_list: List[
-            Recipe
-        ] = []  # Respective mutex is self.queue_worker_task
-
-        self.worker.status_bar_update_signal.connect(self.status_bar_label.setText)
-        self.worker.table_refresh_signal.connect(self.on_worker_update)
+        self.crafting_worker.status_bar_update_signal.connect(
+            self.status_bar_label.setText
+        )
+        self.crafting_worker.recipe_table_update_signal.connect(
+            self.table.on_recipe_table_update
+        )
+        self.classjob_level_changed.connect(self.crafting_worker.set_classjob_level)
+        self.auto_refresh_listings_changed.connect(
+            self.crafting_worker.on_set_auto_refresh_listings
+        )
+        self.search_recipes.connect(self.crafting_worker.on_search_recipe)
 
         self.retainerworker_thread = QThread()
         self.retainerworker = RetainerWorker(
@@ -444,46 +502,38 @@ class MainWindow(QMainWindow):
         # self.retainerworker_thread.started.connect(self.retainerworker.run)
         self.retainerworker_thread.finished.connect(self.retainerworker.deleteLater)
 
-        self.retainer_listings_changed.connect(
-            self.retainerworker.on_retainer_listings_changed
-        )
-        self.worker.retainer_listings_changed.connect(
+        self.crafting_worker.seller_listings_matched_signal.connect(
             self.retainerworker.on_retainer_listings_changed
         )
         self.retainerworker.listing_data_updated.connect(
             self.retainer_table.on_listing_data_updated
         )
 
-        self.worker_thread.start()
+        self.crafting_worker.start()
+        self.retainerworker.load_cache()
         self.retainerworker_thread.start()
-        self.load_retainer_worker_cache()
+
+    @Slot(int, int)
+    def on_classjob_level_value_changed(
+        self, classjob_id: int, classjob_level: int
+    ) -> None:
+        # print(f"ui: Classjob {classjob_id} level changed to {classjob_level}")
+        classjob_config = self.classjob_config[classjob_id]
+        classjob_config.level = classjob_level
+        self.classjob_config[classjob_id] = classjob_config
+        self.table.remove_rows_above_level(classjob_id, classjob_level)
+        self.classjob_level_changed.emit(classjob_id, classjob_level)
+        _logger.info(f"updated {classjob_id} with {classjob_level}")
 
     @Slot()
     def on_item_cleaner_menu_clicked(self) -> None:
-        form = ItemCleanerForm(self, self.worker.get_item_crafting_value_table)
+        form = ItemCleanerForm(self, self.crafting_worker.get_item_crafting_value_table)
         form.show()
-
-    def load_retainer_worker_cache(self) -> None:
-        try:
-            listings_list: List[Listings] = [
-                Listings.parse_raw(listings)
-                for listings in json.load(open(".data/retainer_worker_cache.json", "r"))
-            ]
-            for listings in listings_list:
-                self.retainer_listings_changed.emit(listings)
-        except:
-            pass
 
     @Slot()
     def on_search_return_pressed(self):
-        self.refreshing_table = False
-        xivapi_mutex.lock()
-        recipes = search_recipes(self.search_qlineedit.text())
-        xivapi_mutex.unlock()
         self.table.clear_contents()
-        universalis_mutex.lock()
-        self.table.add_recipes(recipe_list=recipes)
-        universalis_mutex.unlock()
+        self.search_recipes.emit(self.search_lineedit.text())
 
     @Slot(int, int)
     def on_retainer_table_clicked(self, row: int, column: int):
@@ -496,29 +546,24 @@ class MainWindow(QMainWindow):
 
     @Slot(int, int)
     def on_table_clicked(self, row: int, column: int):
-        item_name = self.table.recipe_list[row].ItemResult.Name
-        pyperclip.copy(item_name)
+        for recipe_id, row_widget_list in self.table.table_data.items():
+            if row_widget_list[0].row() == row:
+                break
+        pyperclip.copy(row_widget_list[1].text())
         self.plot_listings(
-            get_listings(self.table.recipe_list[row].ItemResult.ID, world_id)
+            get_listings(get_recipe_by_id(recipe_id).ItemResult.ID, world_id)
         )
 
     @Slot(int, int)
     def on_table_double_clicked(self, row: int, column: int):
-        item_name = self.table.recipe_list[row].ItemResult.Name
+        for recipe_id, row_widget_list in self.table.table_data.items():
+            if row_widget_list[0].row() == row:
+                break
+        item_name = row_widget_list[1].text()
         self.status_bar_label.setText(f"Processing {item_name}...")
-
-        universalis_mutex.lock()
-        listings: Listings = get_listings(
-            self.table.recipe_list[row].ItemResult.ID, world_id, cache_timeout_s=10
-        )
-        if any(listing.sellerID == self.seller_id for listing in listings.listings):
-            self.retainer_listings_changed.emit(listings)
-
         self.recipe_textedit.setText(
-            print_recipe(self.table.recipe_list[row], world_id)
+            print_recipe(get_recipe_by_id(recipe_id), world_id)
         )
-        universalis_mutex.unlock()
-        self.plot_listings(listings)
 
     def plot_listings(self, listings: Listings) -> None:
         self.price_graph.p1.clear()
@@ -600,27 +645,17 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def on_refresh_button_clicked(self):
-        self.refreshing_table = True
-        self.worker.refresh_recipe_request_sem.release()
-
-    @Slot()
-    def on_worker_update(self):
-        if self.refreshing_table:
-            self.refresh_table()
-
-    def refresh_table(self):
+        self.search_lineedit.clear()
         self.table.clear_contents()
-        universalis_mutex.lock()
-        self.table.add_recipes(self.worker.table_row_data)
-        universalis_mutex.unlock()
+        self.auto_refresh_listings_changed.emit(True)
 
     def closeEvent(self, event):
-        self.worker.stop()
-        self.status_bar_label.setText("Exiting...")
-        self.worker_thread.quit()
-        self.worker_thread.wait()
+        print("exiting...")
+        self.crafting_worker.stop()
+        self.crafting_worker.wait()
         self.retainerworker_thread.quit()
         self.retainerworker_thread.wait()
+        self.classjob_config.save_to_disk()
         universalis_save_to_disk()
         xivapi_save_to_disk()
         self.retainerworker.save_cache()
