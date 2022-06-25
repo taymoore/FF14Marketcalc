@@ -19,6 +19,7 @@ from universalis.models import Listing, Listings
 from xivapi.xivapi import (
     get_classjob_doh_list,
     get_recipes,
+    search_recipes,
     xivapi_mutex,
     yield_recipes,
 )
@@ -40,6 +41,7 @@ class CraftingWorker(QThread):
         self.classjob_config_dict = classjob_config_dict
         self.classjob_level_current_dict: Dict[int, int] = {}
         self.recipe_list = RecipeCollection()
+        self.auto_refresh_listings = True
         super().__init__(parent)
 
     @Slot(int, int)
@@ -67,6 +69,20 @@ class CraftingWorker(QThread):
         ).regularSaleVelocity
         self.recipe_table_update_signal.emit(recipe, profit, regularSaleVelocity)
 
+    @Slot(str)
+    def on_search_recipe(self, search_string: str) -> None:
+        self.auto_refresh_listings = False
+        print(f"Searching for '{search_string}'")
+        recipes = search_recipes(search_string)
+        if len(recipes) > 0:
+            self.refresh_listings(recipes)
+
+    @Slot(bool)
+    def on_set_auto_refresh_listings(self, refresh: bool) -> None:
+        self.auto_refresh_listings = refresh
+        if refresh:
+            self.refresh_listings()
+
     @Slot(list)
     def refresh_listings(self, recipe_list: List[Recipe] = None) -> None:
         recipe_list = recipe_list if recipe_list else self.recipe_list
@@ -85,7 +101,6 @@ class CraftingWorker(QThread):
         print("Starting crafting worker")
         while not self.isInterruptionRequested():
             for classjob in self.classjob_config_dict.values():
-                # print(f"Getting recipes for classjob {classjob.Name}")
                 if (
                     classjob_level := self.classjob_level_current_dict.setdefault(
                         classjob.ID, classjob.level
@@ -94,9 +109,6 @@ class CraftingWorker(QThread):
                     self.print_status(
                         f"Getting recipes for class {classjob.Abbreviation} level {classjob_level}..."
                     )
-                    # print(
-                    #     f"Getting recipes for class {classjob.Abbreviation} level {classjob_level}..."
-                    # )
                     for recipe in yield_recipes(classjob.ID, classjob_level):
                         QCoreApplication.processEvents()
                         if self.isInterruptionRequested():
@@ -105,8 +117,8 @@ class CraftingWorker(QThread):
                         print(f"Got recipe {recipe.ItemResult.Name}")
                         self.update_table_recipe(recipe)
                     self.classjob_level_current_dict[classjob.ID] -= 1
-                # print("refreshing listings")
-                self.refresh_listings()
+                if self.auto_refresh_listings:
+                    self.refresh_listings()
             if not any(
                 current_level > 0
                 for current_level in self.classjob_level_current_dict.values()
@@ -116,10 +128,6 @@ class CraftingWorker(QThread):
                 while sleep_ctr > 0:
                     QThread.sleep(1)
                     sleep_ctr -= 1
-                    # QCoreApplication.processEvents()
-                    # print(
-                    #     f"classjob_level_current_dict: {self.classjob_level_current_dict}"
-                    # )
                     if any(
                         current_level > 0
                         for current_level in self.classjob_level_current_dict.values()

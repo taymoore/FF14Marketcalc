@@ -365,11 +365,11 @@ class MainWindow(QMainWindow):
 
     retainer_listings_changed = Signal(Listings)
     classjob_level_changed = Signal(int, int)
+    auto_refresh_listings_changed = Signal(bool)
+    search_recipes = Signal(str)
 
     def __init__(self):
         super().__init__()
-
-        self.refreshing_table = True
 
         self.main_widget = QWidget()
 
@@ -398,9 +398,9 @@ class MainWindow(QMainWindow):
         self.search_label = QLabel(self)
         self.search_label.setText("Search:")
         self.search_layout.addWidget(self.search_label)
-        self.search_qlineedit = QLineEdit(self)
-        self.search_qlineedit.returnPressed.connect(self.on_search_return_pressed)
-        self.search_layout.addWidget(self.search_qlineedit)
+        self.search_lineedit = QLineEdit(self)
+        self.search_lineedit.returnPressed.connect(self.on_search_return_pressed)
+        self.search_layout.addWidget(self.search_lineedit)
         self.search_refresh_button = QPushButton(self)
         self.search_refresh_button.setText("Refresh")
         self.search_refresh_button.clicked.connect(self.on_refresh_button_clicked)
@@ -484,6 +484,10 @@ class MainWindow(QMainWindow):
             self.table.on_recipe_table_update
         )
         self.classjob_level_changed.connect(self.crafting_worker.set_classjob_level)
+        self.auto_refresh_listings_changed.connect(
+            self.crafting_worker.on_set_auto_refresh_listings
+        )
+        self.search_recipes.connect(self.crafting_worker.on_search_recipe)
 
         self.retainerworker_thread = QThread()
         self.retainerworker = RetainerWorker(
@@ -538,10 +542,8 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def on_search_return_pressed(self):
-        self.refreshing_table = False
-        recipes = search_recipes(self.search_qlineedit.text())
         self.table.clear_contents()
-        self.table.add_recipes(recipe_list=recipes)
+        self.search_recipes.emit(self.search_lineedit.text())
 
     @Slot(int, int)
     def on_retainer_table_clicked(self, row: int, column: int):
@@ -653,21 +655,13 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def on_refresh_button_clicked(self):
-        self.refreshing_table = True
-        self.crafting_worker.refresh_recipe_request_sem.release()
-
-    @Slot()
-    def on_worker_update(self):
-        if self.refreshing_table:
-            self.refresh_table()
-
-    def refresh_table(self):
+        self.search_lineedit.clear()
         self.table.clear_contents()
-        self.table.add_recipes(self.crafting_worker.table_row_data)
+        self.auto_refresh_listings_changed.emit(True)
 
     def closeEvent(self, event):
+        print("exiting...")
         self.crafting_worker.stop()
-        self.status_bar_label.setText("Exiting...")
         self.crafting_worker.wait()
         self.retainerworker_thread.quit()
         self.retainerworker_thread.wait()
