@@ -86,6 +86,21 @@ get_classjob_doh_list = Persist(
 )
 
 
+def _get_classjob_dol_list() -> List[ClassJob]:
+    classjob_dol_list = []
+    for result_list in get_content_pages("ClassJob"):
+        for result in result_list:
+            classjob_info: ClassJob = get_content(result.Url, ClassJob)
+            if classjob_info.ClassJobCategory.Name == "Disciple of the Land":
+                classjob_dol_list.append(classjob_info)
+    return classjob_dol_list
+
+
+get_classjob_dol_list = Persist(
+    _get_classjob_dol_list, "classjob_dol.json", 3600 * 24 * 30, ClassJobCollection
+)
+
+
 def get_content_pages(content_name: str) -> Generator[List[PageResult], None, None]:
     first_page: Page = get_content(content_name, Page)
     yield first_page.Results

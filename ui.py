@@ -41,6 +41,7 @@ from QTableWidgetFloatItem import QTableWidgetFloatItem
 from cache import PersistMapping
 from classjobConfig import ClassJobConfig
 from ff14marketcalc import get_profit, print_recipe
+from gathererWorker.gathererWorker import GathererWindow
 from itemCleaner.itemCleaner import ItemCleanerForm
 from retainerWorker.models import ListingData
 from universalis.models import Listings
@@ -383,6 +384,10 @@ class MainWindow(QMainWindow):
         self.item_cleaner_action.setText("Item Cleaner")
         self.menu_bar.addAction(self.item_cleaner_action)
         self.item_cleaner_action.triggered.connect(self.on_item_cleaner_menu_clicked)
+        self.gatherer_action = QWidgetAction(self)
+        self.gatherer_action.setText("Gatherer")
+        self.menu_bar.addAction(self.gatherer_action)
+        self.gatherer_action.triggered.connect(self.on_gatherer_menu_clicked)
 
         self.main_layout = QVBoxLayout()
         self.classjob_level_layout = QHBoxLayout()
@@ -528,6 +533,11 @@ class MainWindow(QMainWindow):
     @Slot()
     def on_item_cleaner_menu_clicked(self) -> None:
         form = ItemCleanerForm(self, self.crafting_worker.get_item_crafting_value_table)
+        form.show()
+
+    @Slot()
+    def on_gatherer_menu_clicked(self) -> None:
+        form = GathererWindow(self)
         form.show()
 
     @Slot()
