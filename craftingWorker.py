@@ -1,3 +1,4 @@
+import re
 from typing import Dict, List, Optional, Tuple
 from copy import copy
 from PySide6.QtCore import (
@@ -12,7 +13,11 @@ from PySide6.QtCore import (
 )
 from classjobConfig import ClassJobConfig
 from ff14marketcalc import get_profit
-from universalis.universalis import get_listings
+from universalis.universalis import (
+    get_listings,
+    seller_id_in_listings,
+    seller_id_in_recipe,
+)
 
 from xivapi.models import ClassJob, Item, Recipe, RecipeCollection
 from universalis.models import Listing, Listings
@@ -30,6 +35,7 @@ class CraftingWorker(QThread):
         Recipe, float, float
     )  # Recipe, profit, velocity
     status_bar_update_signal = Signal(str)
+    seller_listings_matched_signal = Signal(Listings)
 
     def __init__(
         self,
@@ -44,6 +50,7 @@ class CraftingWorker(QThread):
         self.auto_refresh_listings = True
         super().__init__(parent)
 
+    # Update the maximum classjob level
     @Slot(int, int)
     def set_classjob_level(self, classjob_id: int, classjob_level: int) -> None:
         self.classjob_config_dict[classjob_id].level = classjob_level
@@ -61,14 +68,24 @@ class CraftingWorker(QThread):
         for recipe in recipes_to_remove:
             self.recipe_list.remove(recipe)
 
+    def emit_seller_id_in_recipe(self, recipe: Recipe) -> None:
+        for seller_listing in seller_id_in_recipe(recipe, self.world_id):
+            print(f"Found seller ID in recipe {recipe.ID}")
+            self.seller_listings_matched_signal.emit(seller_listing)
+
     # Update the recipe table with the given recipe
     def update_table_recipe(self, recipe: Recipe) -> None:
+        # print("Updating table recipes")
+        self.emit_seller_id_in_recipe(recipe)
+        # print(f"Getting profit for {recipe.ItemResult.Name}")
         profit = get_profit(recipe, self.world_id)
+        # print(f"Getting velocity for {recipe.ItemResult.Name}")
         regularSaleVelocity = get_listings(
             recipe.ItemResult.ID, self.world_id
         ).regularSaleVelocity
         self.recipe_table_update_signal.emit(recipe, profit, regularSaleVelocity)
 
+    # Search for recipes given by the user
     @Slot(str)
     def on_search_recipe(self, search_string: str) -> None:
         self.auto_refresh_listings = False
@@ -77,12 +94,14 @@ class CraftingWorker(QThread):
         if len(recipes) > 0:
             self.refresh_listings(recipes)
 
+    # Refresh button clicked by user
     @Slot(bool)
     def on_set_auto_refresh_listings(self, refresh: bool) -> None:
         self.auto_refresh_listings = refresh
         if refresh:
             self.refresh_listings()
 
+    # Refresh the listings for the current recipe list
     @Slot(list)
     def refresh_listings(self, recipe_list: List[Recipe] = None) -> None:
         recipe_list = recipe_list if recipe_list else self.recipe_list
@@ -94,9 +113,11 @@ class CraftingWorker(QThread):
             QCoreApplication.processEvents()
             if self.isInterruptionRequested():
                 return
+            self.emit_seller_id_in_recipe(recipe)
             # TODO: If the recipe is in the database, we don't need to refresh it
             self.update_table_recipe(recipe)
 
+    # Run the worker thread
     def run(self):
         print("Starting crafting worker")
         while not self.isInterruptionRequested():
@@ -107,14 +128,16 @@ class CraftingWorker(QThread):
                     )
                 ) > 0:
                     self.print_status(
-                        f"Getting recipes for class {classjob.Abbreviation} level {classjob_level}..."
+                        f"Getting recipes for {classjob.Abbreviation} level {classjob_level}..."
                     )
                     for recipe in yield_recipes(classjob.ID, classjob_level):
                         QCoreApplication.processEvents()
                         if self.isInterruptionRequested():
                             return
                         self.recipe_list.append(recipe)
-                        print(f"Got recipe {recipe.ItemResult.Name}")
+                        self.print_status(
+                            f"{classjob.Abbreviation} lvl {classjob_level}: Refreshing {recipe.ItemResult.Name}..."
+                        )
                         self.update_table_recipe(recipe)
                     self.classjob_level_current_dict[classjob.ID] -= 1
                 if self.auto_refresh_listings:

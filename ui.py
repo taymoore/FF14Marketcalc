@@ -46,7 +46,10 @@ from retainerWorker.models import ListingData
 from universalis.models import Listings
 from craftingWorker import CraftingWorker
 from retainerWorker.retainerWorker import RetainerWorker
-from universalis.universalis import get_listings
+from universalis.universalis import (
+    get_listings,
+    set_seller_id,
+)
 from universalis.universalis import save_to_disk as universalis_save_to_disk
 from xivapi.models import ClassJob, Recipe, RecipeCollection
 from xivapi.xivapi import (
@@ -351,9 +354,10 @@ class MainWindow(QMainWindow):
             super().__init__()
             self.label = QLabel(parent)
             self.label.setText(classjob_config.Abbreviation)
+            self.label.setAlignment(Qt.AlignRight)
             self.addWidget(self.label)
             self.spinbox = QSpinBox(parent)
-            self.spinbox.setMaximum(70)
+            self.spinbox.setMaximum(90)
             self.spinbox.setValue(classjob_config.level)
             self.addWidget(self.spinbox)
 
@@ -421,6 +425,7 @@ class MainWindow(QMainWindow):
         self.seller_id = (
             "4d9521317c92e33772cd74a166c72b0207ab9edc5eaaed5a1edb52983b70b2c2"
         )
+        set_seller_id(self.seller_id)
 
         self.retainer_table = MainWindow.RetainerTable(self, self.seller_id)
         self.retainer_table.cellClicked.connect(self.on_retainer_table_clicked)
@@ -497,20 +502,16 @@ class MainWindow(QMainWindow):
         # self.retainerworker_thread.started.connect(self.retainerworker.run)
         self.retainerworker_thread.finished.connect(self.retainerworker.deleteLater)
 
-        self.retainer_listings_changed.connect(
+        self.crafting_worker.seller_listings_matched_signal.connect(
             self.retainerworker.on_retainer_listings_changed
         )
-        # TODO: Add this to getting listings
-        # self.crafting_worker.retainer_listings_changed.connect(
-        #     self.retainerworker.on_retainer_listings_changed
-        # )
         self.retainerworker.listing_data_updated.connect(
             self.retainer_table.on_listing_data_updated
         )
 
         self.crafting_worker.start()
+        self.retainerworker.load_cache()
         self.retainerworker_thread.start()
-        self.load_retainer_worker_cache()
 
     @Slot(int, int)
     def on_classjob_level_value_changed(
@@ -528,17 +529,6 @@ class MainWindow(QMainWindow):
     def on_item_cleaner_menu_clicked(self) -> None:
         form = ItemCleanerForm(self, self.crafting_worker.get_item_crafting_value_table)
         form.show()
-
-    def load_retainer_worker_cache(self) -> None:
-        try:
-            listings_list: List[Listings] = [
-                Listings.parse_raw(listings)
-                for listings in json.load(open(".data/retainer_worker_cache.json", "r"))
-            ]
-            for listings in listings_list:
-                self.retainer_listings_changed.emit(listings)
-        except:
-            pass
 
     @Slot()
     def on_search_return_pressed(self):

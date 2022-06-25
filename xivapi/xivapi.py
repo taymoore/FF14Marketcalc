@@ -149,7 +149,6 @@ def yield_recipes(
                 if page_result.UrlType == "Recipe":
                     url_list.append(page_result.Url)
                     yield get_recipe(page_result.Url)
-        print(f"{len(url_list)} recipes")
         recipe_classjob_level_list_mutex.lock()
         recipe_classjob_level_list.setdefault(classjob_id, {})[
             classjob_level

@@ -1,15 +1,16 @@
 import json
 import pickle
-from typing import Any, Dict, Optional, Tuple, TypeVar, Union
+from typing import Any, Dict, List, Optional, Tuple, TypeVar, Union
 import logging
 import time
 import pandas as pd
 from pydantic import BaseModel
 import requests
-from PySide6.QtCore import QMutex
+from PySide6.QtCore import QMutex, Signal
 from cache import Persist, persist_to_file
 
 from universalis.models import Listings
+from xivapi.models import Item, Recipe
 
 _logger = logging.getLogger(__name__)
 
@@ -87,8 +88,40 @@ def _get_listings(id: int, world: Union[int, str]) -> Listings:
     return Listings.parse_obj(content_response.json())
 
 
+seller_id = None
+
+
+def set_seller_id(id: str) -> None:
+    global seller_id
+    seller_id = id
+
+
+def seller_id_in_listings(listings: Listings) -> bool:
+    global seller_id
+    return seller_id is not None and any(
+        listing.sellerID == seller_id for listing in listings.listings
+    )
+
+
+def seller_id_in_recipe(recipe: Recipe, world_id: int) -> List[Listings]:
+    global seller_id
+    listings_list = []
+    listings = get_listings(recipe.ItemResult.ID, world_id)
+    if seller_id_in_listings(listings):
+        listings_list.append(listings)
+    for ingredient_index in range(9):
+        item: Item = getattr(recipe, f"ItemIngredient{ingredient_index}")
+        if item is not None:
+            listings = get_listings(item.ID, world_id)
+            if seller_id_in_listings(listings):
+                listings_list.append(listings)
+    return listings_list
+
+
 def get_listings(
-    id: int, world: Union[int, str], cache_timeout_s: Optional[float] = None
+    id: int,
+    world: Union[int, str],
+    cache_timeout_s: Optional[float] = None,
 ) -> Listings:
     _cache_timeout_s = (
         cache_timeout_s if cache_timeout_s is not None else CACHE_TIMEOUT_S
@@ -104,13 +137,13 @@ def get_listings(
     if str(_args) not in cache or time.time() - cache[str(_args)][1] > _cache_timeout_s:
         listings = _get_listings(id, world)
 
+        # Merge history and listing_history
         if str(_args) in cache:
             listings.history = cache[str(_args)][0].history
             listings.listing_history = cache[str(_args)][0].listing_history
         else:
             listings.history = pd.DataFrame(columns=["Price"])
             listings.listing_history = pd.DataFrame(columns=["Price"])
-        # Update persistent memory items
         for recent_history_listing in listings.recentHistory:
             listings.history.loc[
                 recent_history_listing.timestamp
@@ -123,11 +156,9 @@ def get_listings(
             len(listings.history.index) > 0
             and listings.history.index.max() != listings.history.index.min()
         ):
-            listings.regularSaleVelocity = min(
-                (3600 * 24 * 7 * len(listings.history.index))
-                / (listings.history.index.max() - listings.history.index.min()),
-                listings.regularSaleVelocity,
-            )
+            listings.regularSaleVelocity = (
+                3600 * 24 * 7 * len(listings.history.index)
+            ) / (listings.history.index.max() - listings.history.index.min())
 
         cache[str(_args)] = (listings, time.time())
 

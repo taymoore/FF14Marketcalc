@@ -1,7 +1,9 @@
 import json
 import logging
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from copy import copy
+import pickle
 from PySide6.QtCore import (
     Slot,
     Signal,
@@ -37,14 +39,24 @@ class RetainerWorker(QObject):
         self.world_id = world_id
         self.table_data: Dict[int, ListingData] = {}  # timerId: ListingData
         self.running = True
+        self.file_path = Path(".data/retainer_worker_cache.bin")
         _logger.setLevel(logging.DEBUG)
 
+    def load_cache(self) -> None:
+        try:
+            if self.file_path.exists():
+                with self.file_path.open("rb") as f:
+                    listings_list = pickle.load(f)
+                    for listings in listings_list:
+                        self.on_retainer_listings_changed(listings)
+        except Exception as e:
+            _logger.exception(e)
+
     def save_cache(self) -> None:
-        json.dump(
-            [listing_data.listings.json() for listing_data in self.table_data.values()],
-            open(".data/retainer_worker_cache.json", "w"),
-            indent=2,
-        )
+        with self.file_path.open("wb") as f:
+            pickle.dump(
+                [listing_data.listings for listing_data in self.table_data.values()], f
+            )
 
     def build_listing_data(self, listings: Listings) -> ListingData:
         listing_data = ListingData(
