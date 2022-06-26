@@ -80,7 +80,6 @@ from xivapi.xivapi import (
     search_recipes,
     get_content,
 )
-from xivapi.xivapi import save_to_disk as xivapi_save_to_disk
 
 
 class GathererWorker(QThread):
@@ -89,6 +88,7 @@ class GathererWorker(QThread):
         gathering_items: Dict[int, GatheringItem]
 
     status_bar_update_signal = Signal(str)
+    item_table_update_signal = Signal(GatheringItem, float, float)
 
     def __init__(
         self,
@@ -136,6 +136,11 @@ class GathererWorker(QThread):
             self.gathering_items.gathering_items[gathering_item.ID] = gathering_item
             yield gathering_item
 
+    def update_table_item(self, gathering_item: GatheringItem) -> None:
+        listings = get_listings(gathering_item.Item.ID, self.world_id)
+        profit = listings.minPrice * 0.95
+        velocity = listings.regularSaleVelocity
+
     def run(self):
         print("Starting gatherer worker")
         while not self.isInterruptionRequested():
@@ -151,7 +156,50 @@ class GathererWorker(QThread):
 
 
 class GathererWindow(QMainWindow):
-    # class ItemsTableWidget(QTableWidget)
+    class ItemsTableWidget(QTableWidget):
+        def __init__(self, parent: QWidget):
+            super().__init__(parent)
+            self.setColumnCount(5)
+            self.setHorizontalHeaderLabels(
+                ["Job", "Item", "Profit", "Velocity", "Score"]
+            )
+            self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+            self.verticalHeader().hide()
+            self.setEditTriggers(QAbstractItemView.NoEditTriggers)
+
+            # item_id -> row
+            self.table_data: Dict[int, List[QTableWidgetItem]] = {}
+
+        def clear_contents(self) -> None:
+            self.clearContents()
+            self.setRowCount(0)
+            self.table_data.clear()
+
+        @Slot(Recipe, float, float)
+        def on_recipe_table_update(
+            self, recipe: Recipe, profit: float, velocity: float
+        ) -> None:
+            if recipe.ID in self.table_data:
+                row = self.table_data[recipe.ID]
+                row[2].setText(f"{profit:,.0f}")
+                row[3].setText(f"{velocity:.2f}")
+                row[4].setText(f"{profit * velocity:,.0f}")
+            else:
+                row: List[QTableWidgetItem] = []
+                row.append(QTableWidgetFloatItem(recipe.ClassJob.Abbreviation))
+                row.append(QTableWidgetFloatItem(recipe.ItemResult.Name))
+                row.append(QTableWidgetFloatItem(f"{profit:,.0f}"))
+                row.append(QTableWidgetFloatItem(f"{velocity:.2f}"))
+                row.append(QTableWidgetFloatItem(f"{profit * velocity:,.0f}"))
+                self.insertRow(self.rowCount())
+                self.setItem(self.rowCount() - 1, 0, row[0])
+                self.setItem(self.rowCount() - 1, 1, row[1])
+                self.setItem(self.rowCount() - 1, 2, row[2])
+                self.setItem(self.rowCount() - 1, 3, row[3])
+                self.setItem(self.rowCount() - 1, 4, row[4])
+                self.table_data[recipe.ID] = row
+            self.sortItems(4, Qt.DescendingOrder)
+
     def __init__(
         self,
         world_id: int,
