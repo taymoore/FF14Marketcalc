@@ -76,16 +76,20 @@ def _get_listings(id: int, world: Union[int, str]) -> Listings:
     now_time = time.time()
     if now_time - get_content_time < GET_CONTENT_RATE:
         time.sleep(GET_CONTENT_RATE - now_time + get_content_time)
-    get_content_time = time.time()
-    content_response = requests.get(url)
-    while content_response.status_code != 200:
-        time.sleep(0.05)
-        _logger.log(
-            logging.WARN, f"Error code {content_response.status_code} with url {url}"
-        )
-        content_response = requests.get(url)
-    content_response.raise_for_status()
-    return Listings.parse_obj(content_response.json())
+    for _ in range(10):
+        try:
+            content_response = requests.get(url)
+            get_content_time = time.time()
+            content_response.raise_for_status()
+        except Exception as e:
+            time.sleep(0.05)
+            print(str(e))
+        else:
+            break
+    if content_response is not None:
+        return Listings.parse_obj(content_response.json())
+    else:
+        raise RuntimeError("Failed to get Universalis Content")
 
 
 seller_id = None
