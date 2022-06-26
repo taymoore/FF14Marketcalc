@@ -21,6 +21,7 @@ from PySide6.QtCore import QMutex, QMutexLocker
 from xivapi.models import (
     ClassJob,
     ClassJobCollection,
+    GatheringItemLevelConvertTable,
     Item,
     Page,
     PageResult,
@@ -73,7 +74,7 @@ get_item = Persist(_get_item, "items.json", 3600 * 24 * 30, Item)
 
 def _get_classjob_doh_list() -> List[ClassJob]:
     classjob_doh_list = []
-    for result_list in get_content_pages("ClassJob"):
+    for result_list in get_content_page_results("ClassJob"):
         for result in result_list:
             classjob_info: ClassJob = get_content(result.Url, ClassJob)
             if classjob_info.ClassJobCategory.Name == "Disciple of the Hand":
@@ -86,27 +87,21 @@ get_classjob_doh_list = Persist(
 )
 
 
-def _get_classjob_dol_list() -> List[ClassJob]:
-    classjob_dol_list = []
-    for result_list in get_content_pages("ClassJob"):
-        for result in result_list:
-            classjob_info: ClassJob = get_content(result.Url, ClassJob)
-            if classjob_info.ClassJobCategory.Name == "Disciple of the Land":
-                classjob_dol_list.append(classjob_info)
-    return classjob_dol_list
-
-
-get_classjob_dol_list = Persist(
-    _get_classjob_dol_list, "classjob_dol.json", 3600 * 24 * 30, ClassJobCollection
-)
-
-
-def get_content_pages(content_name: str) -> Generator[List[PageResult], None, None]:
+def get_content_page_results(
+    content_name: str,
+) -> Generator[List[PageResult], None, None]:
     first_page: Page = get_content(content_name, Page)
     yield first_page.Results
     for page in range(2, first_page.Pagination.PageTotal + 1):
         next_page: Page = get_content(f"{content_name}&page={page}", Page)
         yield next_page.Results
+
+
+def yeild_content_page(content_name: str) -> Generator[Page, None, None]:
+    first_page: Page = get_content(content_name, Page, False)
+    yield first_page
+    for page in range(2, first_page.Pagination.PageTotal + 1):
+        yield get_content(f"{content_name}&page={page}", Page, False)
 
 
 def _get_recipe(url: str) -> Recipe:
@@ -122,7 +117,7 @@ def get_recipe_by_id(recipe_id: int) -> Recipe:
 
 def _get_recipes(classjob_id: int, classjob_level: int) -> RecipeCollection:
     recipe_collection = RecipeCollection()
-    for recipe_results in get_content_pages(
+    for recipe_results in get_content_page_results(
         f"search?filters=RecipeLevelTable.ClassJobLevel={classjob_level},ClassJob.ID={classjob_id}"
     ):
         for recipe_result in recipe_results:
@@ -159,7 +154,7 @@ def yield_recipes(
         print(f"No cached recipes for {classjob_id} {classjob_level}")
         recipe_classjob_level_list_mutex.unlock()
         url_list: List[str] = []
-        for page_result_list in get_content_pages(
+        for page_result_list in get_content_page_results(
             f"search?filters=RecipeLevelTable.ClassJobLevel={classjob_level},ClassJob.ID={classjob_id}"
         ):
             print(f"{len(page_result_list)} recipes")
@@ -188,7 +183,7 @@ def get_recipes_up_to_level(
 
 def search_recipes(search_string: str) -> RecipeCollection:
     recipe_collection = RecipeCollection()
-    for results in get_content_pages(f"search?string={search_string}"):
+    for results in get_content_page_results(f"search?string={search_string}"):
         for recipe_result in results:
             if recipe_result.UrlType == "Recipe":
                 recipe_collection.append(get_recipe(recipe_result.Url))

@@ -356,6 +356,7 @@ class MainWindow(QMainWindow):
             self.label = QLabel(parent)
             self.label.setText(classjob_config.Abbreviation)
             self.label.setAlignment(Qt.AlignRight)
+            self.label.setAlignment(Qt.AlignCenter)
             self.addWidget(self.label)
             self.spinbox = QSpinBox(parent)
             self.spinbox.setMaximum(90)
@@ -515,7 +516,9 @@ class MainWindow(QMainWindow):
         )
 
         self.crafting_worker.start()
-        self.retainerworker.load_cache()
+        self.retainerworker.load_cache(
+            self.crafting_worker.seller_listings_matched_signal
+        )
         self.retainerworker_thread.start()
 
     @Slot(int, int)
@@ -533,11 +536,13 @@ class MainWindow(QMainWindow):
     @Slot()
     def on_item_cleaner_menu_clicked(self) -> None:
         form = ItemCleanerForm(self, self.crafting_worker.get_item_crafting_value_table)
+        # TODO: Connect this
+        # self.crafting_worker.crafting_value_table_changed.connect(self.form.on_crafting_value_table_changed)
         form.show()
 
     @Slot()
     def on_gatherer_menu_clicked(self) -> None:
-        form = GathererWindow(self)
+        form = GathererWindow(world_id, self)
         form.show()
 
     @Slot()
@@ -660,7 +665,7 @@ class MainWindow(QMainWindow):
         self.auto_refresh_listings_changed.emit(True)
 
     def closeEvent(self, event):
-        print("exiting...")
+        print("exiting ui...")
         self.crafting_worker.stop()
         self.crafting_worker.wait()
         self.retainerworker_thread.quit()

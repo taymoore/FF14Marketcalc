@@ -44,6 +44,8 @@ class ItemCleanerForm(QDialog):
             self.setRowCount(0)
             self.table_data.clear()
 
+        # TODO: Connect crafting worker crafting_value_changed signal to modify table
+
         def add_row(self, item_id: int, name: str, crafting_value: float):
             row_widgets: List[QTableWidgetItem] = []
             row_widgets.append(QTableWidgetItem(name))

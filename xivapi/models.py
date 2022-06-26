@@ -111,3 +111,30 @@ class Recipe(BaseModel):
 class RecipeCollection(BaseCollectionModel[Recipe]):
     class Config:
         validate_assignment_strict = False
+
+
+class GatheringItemLevelTable(BaseModel):
+    GatheringItemLevel: Dict[int, int]
+
+
+class GatheringPointBase(BaseModel):
+    Item0: Dict[int, int]
+
+
+class GameContentLinks(BaseModel):
+    FishParameter: Optional[GatheringItemLevelTable]
+    GatheringItem: Optional[GatheringItemLevelTable]
+    GatheringPointBase: Optional[GatheringPointBase]
+
+
+class GatheringItemLevelConvertTable(BaseModel):
+    GameContentLinks: GameContentLinks
+    GatheringItemLevel: int
+    ID: int
+
+
+class GatheringItem(BaseModel):
+    GameContentLinks: GameContentLinks
+    ID: int
+    Item: Item
+    ItemTargetID: int

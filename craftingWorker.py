@@ -18,7 +18,7 @@ from universalis.universalis import (
     seller_id_in_recipe,
 )
 
-from xivapi.models import Recipe, RecipeCollection
+from xivapi.models import Recipe, RecipeCollection, Item
 from universalis.models import Listings
 from xivapi.xivapi import (
     get_item,
@@ -33,6 +33,7 @@ class CraftingWorker(QThread):
     )  # Recipe, profit, velocity
     status_bar_update_signal = Signal(str)
     seller_listings_matched_signal = Signal(Listings)
+    crafting_value_table_changed = Signal(dict)
 
     def __init__(
         self,
@@ -45,7 +46,15 @@ class CraftingWorker(QThread):
         self.classjob_level_current_dict: Dict[int, int] = {}
         self.recipe_list = RecipeCollection()
         self.auto_refresh_listings = True
+        self._item_crafting_value_table: Dict[int, float] = {}
+        self._item_crafting_value_table_mutex = QMutex()
         super().__init__(parent)
+
+    def get_item_crafting_value_table(self) -> Dict[int, float]:
+        self._item_crafting_value_table_mutex.lock()
+        r = copy(self._item_crafting_value_table)
+        self._item_crafting_value_table_mutex.unlock()
+        return r
 
     # Update the maximum classjob level
     @Slot(int, int)
@@ -114,6 +123,46 @@ class CraftingWorker(QThread):
                 return
             # TODO: If the recipe is in the database, we don't need to refresh it
             self.update_table_recipe(recipe)
+
+    def update_item_crafting_values(self, recipe_collection: RecipeCollection) -> None:
+        def update_crafting_value_table(
+            recipe: Recipe, crafting_value_table: Dict[int, float]
+        ):
+            for ingredient_index in range(9):
+                QCoreApplication.processEvents()
+                if self.isInterruptionRequested():
+                    return
+                quantity: int = getattr(recipe, f"AmountIngredient{ingredient_index}")
+                item: Item = getattr(recipe, f"ItemIngredient{ingredient_index}")
+                if not item:
+                    break
+                crafting_value_table[item.id] = crafting_value_table.setdefault(
+                    item.id, 0
+                ) + (
+                    quantity
+                    * float(item.LevelItem)
+                    / self.classjob_config_dict[recipe.ClassJob.ID].level
+                )
+                ingredient_recipes: Optional[Tuple[Recipe, ...]] = getattr(
+                    recipe, f"ItemIngredientRecipe{ingredient_index}"
+                )
+                if ingredient_recipes:
+                    # take the recipe from the lowest level class
+                    ingredient_recipe = min(
+                        ingredient_recipes,
+                        key=lambda ingredient_recipe: self.classjob_config_dict[
+                            ingredient_recipe.ClassJob.ID
+                        ].level,
+                    )
+                    update_crafting_value_table(ingredient_recipe, crafting_value_table)
+
+        self._item_crafting_value_table_mutex.lock()
+        self._item_crafting_value_table.clear()
+        recipe: Recipe
+        for recipe in recipe_collection:
+            update_crafting_value_table(recipe, self._item_crafting_value_table)
+        self._item_crafting_value_table_mutex.unlock()
+        self.crafting_value_table_changed.emit(self._item_crafting_value_table)
 
     # Run the worker thread
     def run(self):

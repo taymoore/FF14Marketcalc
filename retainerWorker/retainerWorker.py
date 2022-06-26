@@ -42,13 +42,14 @@ class RetainerWorker(QObject):
         self.file_path = Path(".data/retainer_worker_cache.bin")
         _logger.setLevel(logging.DEBUG)
 
-    def load_cache(self) -> None:
+    def load_cache(self, retainer_listings_changed_signal: Signal) -> None:
         try:
             if self.file_path.exists():
                 with self.file_path.open("rb") as f:
                     listings_list = pickle.load(f)
                     for listings in listings_list:
-                        self.on_retainer_listings_changed(listings)
+                        retainer_listings_changed_signal.emit(listings)
+                        # self.on_retainer_listings_changed(listings)
         except Exception as e:
             _logger.exception(e)
 
