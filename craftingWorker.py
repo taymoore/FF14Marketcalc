@@ -185,7 +185,6 @@ class CraftingWorker(QThread):
                         self.print_status(
                             f"{classjob.Abbreviation} lvl {classjob_level}: Refreshing {recipe.ItemResult.Name}..."
                         )
-                        self.update_table_recipe(recipe)
                     self.classjob_level_current_dict[classjob.ID] -= 1
                 if self.auto_refresh_listings:
                     self.refresh_listings()

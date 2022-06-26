@@ -1,5 +1,7 @@
 import json
 import logging
+from operator import mod
+from pydantic import BaseModel
 from scipy import stats
 from typing import Dict, List, Optional, Tuple
 import pandas as pd
@@ -18,6 +20,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
+    QTableWidget,
     QApplication,
     QWidget,
     QTableWidget,
@@ -48,7 +51,7 @@ from pyqtgraph import (
     mkPen,
 )
 from QTableWidgetFloatItem import QTableWidgetFloatItem
-from cache import PersistMapping
+from cache import PersistMapping, load_cache, save_cache
 from classjobConfig import ClassJobConfig
 from ff14marketcalc import get_profit, print_recipe
 from itemCleaner.itemCleaner import ItemCleanerForm
@@ -63,6 +66,7 @@ from universalis.universalis import (
 from universalis.universalis import save_to_disk as universalis_save_to_disk
 from xivapi.models import (
     ClassJob,
+    GatheringItem,
     Item,
     Recipe,
     RecipeCollection,
@@ -70,16 +74,20 @@ from xivapi.models import (
 )
 from xivapi.xivapi import (
     get_classjob_doh_list,
+    get_page,
     get_recipe_by_id,
     get_recipes,
     search_recipes,
     get_content,
-    yeild_content_page,
 )
 from xivapi.xivapi import save_to_disk as xivapi_save_to_disk
 
 
 class GathererWorker(QThread):
+    class GatheringItems(BaseModel):
+        results_max: Optional[int]
+        gathering_items: Dict[int, GatheringItem]
+
     status_bar_update_signal = Signal(str)
 
     def __init__(
@@ -89,69 +97,61 @@ class GathererWorker(QThread):
         parent: Optional[QObject] = None,
     ) -> None:
         self.world_id = world_id
+
         self.classjob_config_dict = classjob_config_dict
         self.classjob_level_current_dict: Dict[int, int] = {}
+
+        self.gathering_items_cache_filename = "gathering_items.bin"
+        self.gathering_items = load_cache(
+            self.gathering_items_cache_filename,
+            GathererWorker.GatheringItems(gathering_items={}),
+        )
         super().__init__(parent)
 
-        self.gathering_item_dict = PersistMapping[int, Item](
-            "gathering_items.bin"
-        )  # item.ID -> item
-        self.gathering_level_item_search_index = 0
-        self.gathering_level_item_dict = PersistMapping[
-            int, GatheringItemLevelConvertTable
-        ](
-            "gathering_level_item.bin"
-        )  # gatherer.level -> GatheringItemLevelConvertTable
-
     # def update_table_item(self, )
+    def print_status(self, text: str):
+        self.status_bar_update_signal.emit(text)
 
-    def get_gathering_item_level_table(
-        self, jobclass_level: int
-    ) -> GatheringItemLevelConvertTable:
-        if jobclass_level in self.gathering_level_item_dict:
-            return self.gathering_level_item_dict[jobclass_level]
+    def yield_gathering_item(self) -> GatheringItem:
+        if self.gathering_items.results_max is None:
+            self.print_status(f"Getting pagination for gathering items...")
+            page = get_page("GatheringItem", 1)
+            self.gathering_items.results_max = page.Pagination.ResultsTotal
+            gathering_item: GatheringItem = get_content(
+                page.Results[0].Url, GatheringItem
+            )
+            self.gathering_items.gathering_items[gathering_item.ID] = gathering_item
+            yield gathering_item
+        for index in range(
+            len(self.gathering_items.gathering_items), self.gathering_items.results_max
+        ):
+            self.print_status(
+                f"Getting gathering item {index+1}/{self.gathering_items.results_max}..."
+            )
+            if not index % 100:
+                page = get_page("GatheringItem", index % 100 + 1)
+            gathering_item: GatheringItem = get_content(
+                page.Results[index // 100].Url, GatheringItem
+            )
+            self.gathering_items.gathering_items[gathering_item.ID] = gathering_item
+            yield gathering_item
 
     def run(self):
         print("Starting gatherer worker")
         while not self.isInterruptionRequested():
-            for classjob in self.classjob_config_dict.values():
-                if (
-                    classjob_level := self.classjob_level_current_dict.setdefault(
-                        classjob.ID, classjob.level
-                    )
-                ) > 0:
-                    if classjob_level not in self.gathering_level_item_dict:
-                        QCoreApplication.processEvents()
-                        if self.isInterruptionRequested():
-                            break
-                        self.print_status(
-                            f"Getting item list for {classjob.Abbreviation} level {classjob_level}..."
-                        )
-                        self.gathering_level_item_dict[classjob_level] = get_content(
-                            f"GatheringItemLevelConvertTable/{classjob_level}",
-                            GatheringItemLevelConvertTable,
-                            snake_case=True,
-                        )
-                        self.print_status("")
-                    for gatheringitem_id_index, gatheringitem_id in enumerate(
-                        self.gathering_level_item_dict[
-                            classjob_level
-                        ].GameContentLinks.GatheringItem.GatheringItemLevel.values()
-                    ):
-                        if gatheringitem_id not in self.gathering_item_dict:
-                            QCoreApplication.processEvents()
-                            if self.isInterruptionRequested():
-                                break
-                            self.print_status(
-                                f"Getting items for {classjob.Abbreviation} level {classjob_level} ({gatheringitem_id_index+1}/{len(self.gathering_level_item_dict[classjob_level].game_content_links.gathering_item.gathering_item_level)})..."
-                            )
-                            self.gathering_item_dict[gatheringitem_id] = get_content(
-                                f"GatheringItem/{gatheringitem_id}", snake_case=True
-                            )
-                            self.print_status("")
+            for gathering_item in self.yield_gathering_item():
+                QCoreApplication.processEvents()
+                if self.isInterruptionRequested():
+                    return
+
+    def stop(self):
+        print("Stopping gatherer worker")
+        save_cache(self.gathering_items_cache_filename, self.gathering_items)
+        self.requestInterruption()
 
 
 class GathererWindow(QMainWindow):
+    # class ItemsTableWidget(QTableWidget)
     def __init__(
         self,
         world_id: int,

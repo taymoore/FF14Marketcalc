@@ -36,7 +36,7 @@ class Pagination(BaseModel):
 
 class PageResult(BaseModel):
     ID: int
-    Name: str
+    Name: Optional[str]
     Url: str
     UrlType: Optional[str]
 
@@ -118,7 +118,14 @@ class GatheringItemLevelTable(BaseModel):
 
 
 class GatheringPointBase(BaseModel):
-    Item0: Dict[int, int]
+    Item0: Optional[List[int]]
+    Item1: Optional[List[int]]
+    Item2: Optional[List[int]]
+    Item3: Optional[List[int]]
+    Item4: Optional[List[int]]
+    Item5: Optional[List[int]]
+    Item6: Optional[List[int]]
+    Item7: Optional[List[int]]
 
 
 class GameContentLinks(BaseModel):

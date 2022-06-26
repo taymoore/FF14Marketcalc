@@ -93,15 +93,25 @@ def get_content_page_results(
     first_page: Page = get_content(content_name, Page)
     yield first_page.Results
     for page in range(2, first_page.Pagination.PageTotal + 1):
-        next_page: Page = get_content(f"{content_name}&page={page}", Page)
+        next_page: Page = get_content(
+            f"{content_name}&page={page}", Page
+        )  # TODO: This should use ? when not searching
         yield next_page.Results
 
 
-def yeild_content_page(content_name: str) -> Generator[Page, None, None]:
-    first_page: Page = get_content(content_name, Page, False)
-    yield first_page
-    for page in range(2, first_page.Pagination.PageTotal + 1):
-        yield get_content(f"{content_name}&page={page}", Page, False)
+# def yeild_content_page(content_name: str) -> Generator[Page, None, None]:
+#     first_page: Page = get_content(content_name, Page, False)
+#     yield first_page
+#     for page in range(2, first_page.Pagination.PageTotal + 1):
+#         yield get_page(content_name, page)
+
+
+def get_page(content_name: str, page: int) -> Page:
+    if "search" in content_name:
+        delim = "&"
+    else:
+        delim = "?"
+    return get_content(f"{content_name}{delim}page={page}", Page)
 
 
 def _get_recipe(url: str) -> Recipe:

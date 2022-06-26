@@ -120,6 +120,21 @@ class Persist:
         return data
 
 
+T = TypeVar("T")
+
+
+def load_cache(filename: str, default: T) -> T:
+    try:
+        return pickle.load(open(f".data/{filename}", "rb"))
+    except (IOError, ValueError):
+        return default
+
+
+def save_cache(filename: str, data: T) -> None:
+    with open(f".data/{filename}", "wb") as f:
+        pickle.dump(data, f)
+
+
 KT = TypeVar("KT")
 VT = TypeVar("VT")
 
