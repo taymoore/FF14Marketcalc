@@ -55,6 +55,7 @@ def get_content(content_name: str, t: R):
             get_content_time = time.time()
             content_response.raise_for_status()
         except Exception as e:
+            time.sleep(0.05)
             print(str(e))
         else:
             break
