@@ -514,11 +514,11 @@ class MainWindow(QMainWindow):
             self.retainer_table.on_listing_data_updated
         )
 
-        self.crafting_worker.start()
+        self.crafting_worker.start(QThread.LowPriority)
         self.retainerworker.load_cache(
             self.crafting_worker.seller_listings_matched_signal
         )
-        self.retainerworker_thread.start()
+        self.retainerworker_thread.start(QThread.LowPriority)
 
     @Slot(int, int)
     def on_classjob_level_value_changed(

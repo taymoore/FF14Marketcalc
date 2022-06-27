@@ -68,10 +68,12 @@ from universalis.universalis import save_to_disk as universalis_save_to_disk
 from xivapi.models import (
     ClassJob,
     GatheringItem,
+    GatheringPoint,
     GatheringPointBase,
     Item,
     Recipe,
     RecipeCollection,
+    TerritoryType,
 )
 from xivapi.xivapi import (
     get_classjob_doh_list,
@@ -91,6 +93,7 @@ class GathererWorker(QThread):
 
     status_bar_update_signal = Signal(str)
     item_table_update_signal = Signal(GatheringItem, list, float, float)
+    territory_table_update_signal = Signal(TerritoryType)
 
     def __init__(
         self,
@@ -110,6 +113,12 @@ class GathererWorker(QThread):
         )
         self.gathering_point_base_dict = PersistMapping[int, GatheringPointBase](
             "gathering_point_base.bin"
+        )
+        self.gathering_point_dict = PersistMapping[int, GatheringPoint](
+            "gathering_point.bin"
+        )
+        self.territory_type_dict = PersistMapping[int, TerritoryType](
+            "territory_type.bin"
         )
         super().__init__(parent)
 
@@ -143,6 +152,29 @@ class GathererWorker(QThread):
             self.gathering_items.gathering_items[gathering_item.ID] = gathering_item
             yield gathering_item
 
+    def get_gathering_point_base(
+        self, gathering_point_base_id: int
+    ) -> GatheringPointBase:
+        if gathering_point_base_id not in self.gathering_point_base_dict:
+            self.gathering_point_base_dict[gathering_point_base_id] = get_content(
+                f"GatheringPointBase/{gathering_point_base_id}", GatheringPointBase
+            )
+        return self.gathering_point_base_dict[gathering_point_base_id]
+
+    def get_gathering_point(self, gathering_point_id: int) -> GatheringPoint:
+        if gathering_point_id not in self.gathering_point_dict:
+            self.gathering_point_dict[gathering_point_id] = get_content(
+                f"GatheringPoint/{gathering_point_id}", GatheringPoint
+            )
+        return self.gathering_point_dict[gathering_point_id]
+
+    def get_territory_type(self, territory_type_id: int) -> TerritoryType:
+        if territory_type_id not in self.territory_type_dict:
+            self.territory_type_dict[territory_type_id] = get_content(
+                f"TerritoryType/{territory_type_id}", TerritoryType
+            )
+        return self.territory_type_dict[territory_type_id]
+
     def update_table_item(self, gathering_item: GatheringItem) -> None:
         listings = get_listings(gathering_item.Item.ID, self.world_id)
         assert gathering_item.GameContentLinks.GatheringPointBase is not None
@@ -152,21 +184,53 @@ class GathererWorker(QThread):
         ) in (
             gathering_item.GameContentLinks.GatheringPointBase.yield_gathering_point_base_id()
         ):
-            if gathering_point_base_id not in self.gathering_point_base_dict:
-                QCoreApplication.processEvents()
-                if self.isInterruptionRequested():
-                    return
-                self.gathering_point_base_dict[gathering_point_base_id] = get_content(
-                    f"GatheringPointBase/{gathering_point_base_id}", GatheringPointBase
-                )
+            print(f"Getting gathering point base {gathering_point_base_id}")
             gathering_point_base_list.append(
-                self.gathering_point_base_dict[gathering_point_base_id]
+                self.get_gathering_point_base(gathering_point_base_id)
             )
         profit = listings.minPrice * 0.95
         velocity = listings.regularSaleVelocity
         self.item_table_update_signal.emit(
             gathering_item, gathering_point_base_list, profit, velocity
         )
+
+    def update_table_territory(self, gathering_item: GatheringItem) -> None:
+        territory_type_list = []
+        for (
+            gathering_point_base_id
+        ) in (
+            gathering_item.GameContentLinks.GatheringPointBase.yield_gathering_point_base_id()
+        ):
+            QCoreApplication.processEvents()
+            if self.isInterruptionRequested():
+                return
+            print(f"Getting gathering point base {gathering_point_base_id}")
+            gathering_point_base = self.get_gathering_point_base(
+                gathering_point_base_id
+            )
+            for (
+                gathering_point_id
+            ) in (
+                gathering_point_base.GameContentLinks.GatheringPoint.GatheringPointBase
+            ):
+                QCoreApplication.processEvents()
+                if self.isInterruptionRequested():
+                    return
+                print(f"Getting gathering point {gathering_point_id}")
+                gathering_point = self.get_gathering_point(gathering_point_id)
+                if gathering_point.TerritoryTypeTargetID == 1:
+                    continue
+                # QCoreApplication.processEvents()
+                # if self.isInterruptionRequested():
+                #     return
+                print(f"Getting territory type {gathering_point.TerritoryTypeTargetID}")
+                territory_type = self.get_territory_type(
+                    gathering_point.TerritoryTypeTargetID
+                )
+                if territory_type not in territory_type_list:
+                    territory_type_list.append(territory_type)
+        for territory_type in territory_type_list:
+            self.territory_table_update_signal.emit(territory_type)
 
     def run(self):
         print("Starting gatherer worker")
@@ -175,12 +239,20 @@ class GathererWorker(QThread):
                 QCoreApplication.processEvents()
                 if self.isInterruptionRequested():
                     return
+                print("Updating table item")
                 self.update_table_item(gathering_item)
+                QCoreApplication.processEvents()
+                if self.isInterruptionRequested():
+                    return
+                print("Updating table territory")
+                self.update_table_territory(gathering_item)
 
     def stop(self):
         print("Stopping gatherer worker")
         save_cache(self.gathering_items_cache_filename, self.gathering_items)
         self.gathering_point_base_dict.save_to_disk()
+        self.gathering_point_dict.save_to_disk()
+        self.territory_type_dict.save_to_disk()
         self.requestInterruption()
 
 
@@ -279,6 +351,35 @@ class GathererWindow(QMainWindow):
                 self.table_data[gathering_item.ID] = row
             self.sortItems(5, Qt.DescendingOrder)
 
+    class TerritoryTableWidget(QTableWidget):
+        def __init__(self, parent: QWidget):
+            super().__init__(parent)
+            self.setColumnCount(1)
+            self.setHorizontalHeaderLabels(["Name"])
+            self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+            self.verticalHeader().hide()
+            self.setEditTriggers(QAbstractItemView.NoEditTriggers)
+
+            self.table_data: Dict[int, List[QTableWidgetItem]] = {}
+
+        def clear_contents(self) -> None:
+            self.clearContents()
+            self.setRowCount(0)
+            self.table_data.clear()
+
+        @Slot(TerritoryType)
+        def on_item_table_update(
+            self,
+            territory_type: TerritoryType,
+        ) -> None:
+            if territory_type.ID not in self.table_data:
+                row: List[QTableWidgetItem] = []
+                row.append(QTableWidgetFloatItem(territory_type.PlaceName.Name))
+                self.insertRow(self.rowCount())
+                self.setItem(self.rowCount() - 1, 0, row[0])
+                self.table_data[territory_type.ID] = row
+            self.sortItems(0, Qt.DescendingOrder)
+
     def __init__(
         self,
         world_id: int,
@@ -298,7 +399,10 @@ class GathererWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.status_bar_label, 1)
 
         self.item_table = GathererWindow.ItemsTableWidget(self)
-        self.main_layout.addWidget(self.item_table)
+        self.centre_splitter.addWidget(self.item_table)
+
+        self.territory_table = GathererWindow.TerritoryTableWidget(self)
+        self.centre_splitter.addWidget(self.territory_table)
 
         # Workers
         self.classjob_config_dict = PersistMapping[int, ClassJobConfig](
@@ -320,8 +424,11 @@ class GathererWindow(QMainWindow):
         self.gatherer_worker.item_table_update_signal.connect(
             self.item_table.on_item_table_update
         )
+        self.gatherer_worker.territory_table_update_signal.connect(
+            self.territory_table.on_item_table_update
+        )
 
-        self.gatherer_worker.start()
+        self.gatherer_worker.start(QThread.LowPriority)
 
     def closeEvent(self, event) -> None:
         print("exiting Gatherer...")

@@ -142,10 +142,22 @@ class GatheringPointBaseLink(BaseModel):
                     yield item_id
 
 
+class GatheringPointLink(BaseModel):
+    GatheringPointBase: List[
+        int
+    ]  # links to gathering points (not gathering point base)
+
+
+class GatheringItemPointLink(BaseModel):
+    GatheringPoint: List[str]
+
+
 class GameContentLinks(BaseModel):
     # FishParameter: Optional[GatheringItemLevelTable]
     # GatheringItem: Optional[GatheringItemLevelTable]
     GatheringPointBase: Optional[GatheringPointBaseLink]
+    GatheringPoint: Optional[GatheringPointLink]
+    GatheringItemPoint: Optional[GatheringItemPointLink]
 
 
 class GatheringItemLevelConvertTable(BaseModel):
@@ -161,6 +173,7 @@ class GatheringItem(BaseModel):
 
 
 class GatheringPointBase(BaseModel):
+    GameContentLinks: GameContentLinks
     GatheringLevel: int
     GatheringTypeTargetID: int
     ID: int
@@ -178,3 +191,37 @@ class GatheringPointBase(BaseModel):
             item = getattr(self, f"Item{index}")
             if item is not None:
                 yield item
+
+
+class ExportedGatheringPoint(BaseModel):
+    GatheringTypeTargetID: int
+    ID: int
+    Patch: int
+    Radius: int
+    Url: str
+    X: float
+    Y: float
+
+
+class Map(BaseModel):
+    ID: int
+    MapFilename: str
+
+
+class PlaceName(BaseModel):
+    ID: int
+    Name: str
+
+
+class TerritoryType(BaseModel):
+    ID: int
+    Map: Map
+    PlaceName: PlaceName
+
+
+class GatheringPoint(BaseModel):
+    ExportedGatheringPoint: ExportedGatheringPoint
+    GameContentLinks: GameContentLinks
+    ID: int
+    PlaceNameTargetID: int
+    TerritoryTypeTargetID: int
