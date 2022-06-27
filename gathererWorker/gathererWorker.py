@@ -1,3 +1,4 @@
+from asyncio import gather
 import json
 import logging
 from operator import mod
@@ -67,10 +68,10 @@ from universalis.universalis import save_to_disk as universalis_save_to_disk
 from xivapi.models import (
     ClassJob,
     GatheringItem,
+    GatheringPointBase,
     Item,
     Recipe,
     RecipeCollection,
-    GatheringItemLevelConvertTable,
 )
 from xivapi.xivapi import (
     get_classjob_doh_list,
@@ -85,10 +86,11 @@ from xivapi.xivapi import (
 class GathererWorker(QThread):
     class GatheringItems(BaseModel):
         results_max: Optional[int]
+        results_pulled: int = 0
         gathering_items: Dict[int, GatheringItem]
 
     status_bar_update_signal = Signal(str)
-    item_table_update_signal = Signal(GatheringItem, float, float)
+    item_table_update_signal = Signal(GatheringItem, list, float, float)
 
     def __init__(
         self,
@@ -106,40 +108,65 @@ class GathererWorker(QThread):
             self.gathering_items_cache_filename,
             GathererWorker.GatheringItems(gathering_items={}),
         )
+        self.gathering_point_base_dict = PersistMapping[int, GatheringPointBase](
+            "gathering_point_base.bin"
+        )
         super().__init__(parent)
 
-    # def update_table_item(self, )
     def print_status(self, text: str):
         self.status_bar_update_signal.emit(text)
 
     def yield_gathering_item(self) -> GatheringItem:
-        if self.gathering_items.results_max is None:
-            self.print_status(f"Getting pagination for gathering items...")
-            page = get_page("GatheringItem", 1)
-            self.gathering_items.results_max = page.Pagination.ResultsTotal
-            gathering_item: GatheringItem = get_content(
-                page.Results[0].Url, GatheringItem
-            )
-            self.gathering_items.gathering_items[gathering_item.ID] = gathering_item
+        for gathering_item in self.gathering_items.gathering_items.values():
             yield gathering_item
+        page = get_page("GatheringItem", self.gathering_items.results_pulled // 100 + 1)
+        self.gathering_items.results_max = page.Pagination.ResultsTotal
         for index in range(
-            len(self.gathering_items.gathering_items), self.gathering_items.results_max
+            self.gathering_items.results_pulled, self.gathering_items.results_max
         ):
             self.print_status(
                 f"Getting gathering item {index+1}/{self.gathering_items.results_max}..."
             )
             if not index % 100:
-                page = get_page("GatheringItem", index % 100 + 1)
-            gathering_item: GatheringItem = get_content(
-                page.Results[index // 100].Url, GatheringItem
+                print(f"getting page {index//100+1}")
+                page = get_page("GatheringItem", index // 100 + 1)
+                self.gathering_items.results_max = page.Pagination.ResultsTotal
+            print(
+                f"Getting item {index % 100} from page {self.gathering_items.results_pulled // 100 + 1}"
             )
+            gathering_item: GatheringItem = get_content(
+                page.Results[index % 100].Url, GatheringItem
+            )
+            self.gathering_items.results_pulled += 1
+            if gathering_item.Item is None:
+                continue
             self.gathering_items.gathering_items[gathering_item.ID] = gathering_item
             yield gathering_item
 
     def update_table_item(self, gathering_item: GatheringItem) -> None:
         listings = get_listings(gathering_item.Item.ID, self.world_id)
+        assert gathering_item.GameContentLinks.GatheringPointBase is not None
+        gathering_point_base_list = []
+        for (
+            gathering_point_base_id
+        ) in (
+            gathering_item.GameContentLinks.GatheringPointBase.yield_gathering_point_base_id()
+        ):
+            if gathering_point_base_id not in self.gathering_point_base_dict:
+                QCoreApplication.processEvents()
+                if self.isInterruptionRequested():
+                    return
+                self.gathering_point_base_dict[gathering_point_base_id] = get_content(
+                    f"GatheringPointBase/{gathering_point_base_id}", GatheringPointBase
+                )
+            gathering_point_base_list.append(
+                self.gathering_point_base_dict[gathering_point_base_id]
+            )
         profit = listings.minPrice * 0.95
         velocity = listings.regularSaleVelocity
+        self.item_table_update_signal.emit(
+            gathering_item, gathering_point_base_list, profit, velocity
+        )
 
     def run(self):
         print("Starting gatherer worker")
@@ -148,10 +175,12 @@ class GathererWorker(QThread):
                 QCoreApplication.processEvents()
                 if self.isInterruptionRequested():
                     return
+                self.update_table_item(gathering_item)
 
     def stop(self):
         print("Stopping gatherer worker")
         save_cache(self.gathering_items_cache_filename, self.gathering_items)
+        self.gathering_point_base_dict.save_to_disk()
         self.requestInterruption()
 
 
@@ -159,9 +188,9 @@ class GathererWindow(QMainWindow):
     class ItemsTableWidget(QTableWidget):
         def __init__(self, parent: QWidget):
             super().__init__(parent)
-            self.setColumnCount(5)
+            self.setColumnCount(6)
             self.setHorizontalHeaderLabels(
-                ["Job", "Item", "Profit", "Velocity", "Score"]
+                ["Bot", "Min", "Item", "Profit", "Velocity", "Score"]
             )
             self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
             self.verticalHeader().hide()
@@ -175,19 +204,68 @@ class GathererWindow(QMainWindow):
             self.setRowCount(0)
             self.table_data.clear()
 
-        @Slot(Recipe, float, float)
-        def on_recipe_table_update(
-            self, recipe: Recipe, profit: float, velocity: float
+        @Slot(GatheringItem, list, float, float)
+        def on_item_table_update(
+            self,
+            gathering_item: GatheringItem,
+            gathering_point_base_list: List[GatheringPointBase],
+            profit: float,
+            velocity: float,
         ) -> None:
-            if recipe.ID in self.table_data:
-                row = self.table_data[recipe.ID]
-                row[2].setText(f"{profit:,.0f}")
-                row[3].setText(f"{velocity:.2f}")
-                row[4].setText(f"{profit * velocity:,.0f}")
+            if gathering_item.ID in self.table_data:
+                row = self.table_data[gathering_item.ID]
+                row[3].setText(f"{profit:,.0f}")
+                row[4].setText(f"{velocity:.2f}")
+                row[5].setText(f"{profit * velocity:,.0f}")
             else:
                 row: List[QTableWidgetItem] = []
-                row.append(QTableWidgetFloatItem(recipe.ClassJob.Abbreviation))
-                row.append(QTableWidgetFloatItem(recipe.ItemResult.Name))
+                bot_lvl = None
+                min_lvl = None
+                try:
+                    for gathering_point_base in gathering_point_base_list:
+                        if (
+                            gathering_point_base.GatheringTypeTargetID == 1
+                            or gathering_point_base.GatheringTypeTargetID == 3
+                        ):
+                            if bot_lvl is None:
+                                for (
+                                    __gathering_item
+                                ) in gathering_point_base.yield_gathering_items():
+                                    if __gathering_item.ID == gathering_item.ID:
+                                        bot_lvl = (
+                                            __gathering_item.GatheringItemLevel.GatheringItemLevel
+                                        )
+                                        break
+                        elif (
+                            gathering_point_base.GatheringTypeTargetID == 0
+                            or gathering_point_base.GatheringTypeTargetID == 2
+                        ):
+                            if min_lvl is None:
+                                for (
+                                    __gathering_item
+                                ) in gathering_point_base.yield_gathering_items():
+                                    if __gathering_item.ID == gathering_item.ID:
+                                        min_lvl = (
+                                            __gathering_item.GatheringItemLevel.GatheringItemLevel
+                                        )
+                                        break
+                        else:
+                            raise Exception(
+                                f"Unknown gathering type target ID {gathering_point_base.GatheringTypeTargetID} for gathering point base {gathering_point_base.ID}"
+                            )
+                    assert bot_lvl is not None or min_lvl is not None
+                except AssertionError as e:
+                    print(f"Error: {e}")
+                    print(f"Gathering item {gathering_item.ID}")
+                    raise e
+
+                row.append(
+                    QTableWidgetItem(f"{bot_lvl}" if bot_lvl is not None else "")
+                )
+                row.append(
+                    QTableWidgetItem(f"{min_lvl}" if min_lvl is not None else "")
+                )
+                row.append(QTableWidgetFloatItem(gathering_item.Item.Name))
                 row.append(QTableWidgetFloatItem(f"{profit:,.0f}"))
                 row.append(QTableWidgetFloatItem(f"{velocity:.2f}"))
                 row.append(QTableWidgetFloatItem(f"{profit * velocity:,.0f}"))
@@ -197,8 +275,9 @@ class GathererWindow(QMainWindow):
                 self.setItem(self.rowCount() - 1, 2, row[2])
                 self.setItem(self.rowCount() - 1, 3, row[3])
                 self.setItem(self.rowCount() - 1, 4, row[4])
-                self.table_data[recipe.ID] = row
-            self.sortItems(4, Qt.DescendingOrder)
+                self.setItem(self.rowCount() - 1, 5, row[5])
+                self.table_data[gathering_item.ID] = row
+            self.sortItems(5, Qt.DescendingOrder)
 
     def __init__(
         self,
@@ -218,6 +297,10 @@ class GathererWindow(QMainWindow):
         self.status_bar_label = QLabel()
         self.statusBar().addPermanentWidget(self.status_bar_label, 1)
 
+        self.item_table = GathererWindow.ItemsTableWidget(self)
+        self.main_layout.addWidget(self.item_table)
+
+        # Workers
         self.classjob_config_dict = PersistMapping[int, ClassJobConfig](
             "gatherer_classjob_config.bin"
         )
@@ -234,6 +317,10 @@ class GathererWindow(QMainWindow):
         self.gatherer_worker.status_bar_update_signal.connect(
             self.status_bar_label.setText
         )
+        self.gatherer_worker.item_table_update_signal.connect(
+            self.item_table.on_item_table_update
+        )
+
         self.gatherer_worker.start()
 
     def closeEvent(self, event) -> None:

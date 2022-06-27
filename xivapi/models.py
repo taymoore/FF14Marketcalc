@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Dict, Generator, List, Optional, Tuple, Type, Union
 from pydantic import BaseModel
 from pydantic_collections import BaseCollectionModel
 
@@ -47,7 +47,7 @@ class Page(BaseModel):
 
 
 class Item(BaseModel):
-    LevelItem: int
+    LevelItem: Optional[int]
     ID: int
     Name: str
 
@@ -113,11 +113,18 @@ class RecipeCollection(BaseCollectionModel[Recipe]):
         validate_assignment_strict = False
 
 
-class GatheringItemLevelTable(BaseModel):
-    GatheringItemLevel: Dict[int, int]
+# Gathering Stuff
+
+# class GatheringItemLevelTable(BaseModel):
+#     GatheringItemLevel: List[int]
 
 
-class GatheringPointBase(BaseModel):
+# class GatheringType(BaseModel):
+#     ID: int
+#     Name: str
+
+
+class GatheringPointBaseLink(BaseModel):
     Item0: Optional[List[int]]
     Item1: Optional[List[int]]
     Item2: Optional[List[int]]
@@ -127,21 +134,47 @@ class GatheringPointBase(BaseModel):
     Item6: Optional[List[int]]
     Item7: Optional[List[int]]
 
+    def yield_gathering_point_base_id(self) -> Generator[int, None, None]:
+        for index in range(8):
+            item_list = getattr(self, f"Item{index}")
+            if item_list is not None:
+                for item_id in item_list:
+                    yield item_id
+
 
 class GameContentLinks(BaseModel):
-    FishParameter: Optional[GatheringItemLevelTable]
-    GatheringItem: Optional[GatheringItemLevelTable]
-    GatheringPointBase: Optional[GatheringPointBase]
+    # FishParameter: Optional[GatheringItemLevelTable]
+    # GatheringItem: Optional[GatheringItemLevelTable]
+    GatheringPointBase: Optional[GatheringPointBaseLink]
 
 
 class GatheringItemLevelConvertTable(BaseModel):
-    GameContentLinks: GameContentLinks
     GatheringItemLevel: int
-    ID: int
 
 
 class GatheringItem(BaseModel):
-    GameContentLinks: GameContentLinks
+    GameContentLinks: Optional[GameContentLinks]
+    GatheringItemLevel: Optional[GatheringItemLevelConvertTable]
     ID: int
-    Item: Item
+    Item: Optional[Item]
     ItemTargetID: int
+
+
+class GatheringPointBase(BaseModel):
+    GatheringLevel: int
+    GatheringTypeTargetID: int
+    ID: int
+    Item0: Optional[GatheringItem]
+    Item1: Optional[GatheringItem]
+    Item2: Optional[GatheringItem]
+    Item3: Optional[GatheringItem]
+    Item4: Optional[GatheringItem]
+    Item5: Optional[GatheringItem]
+    Item6: Optional[GatheringItem]
+    Item7: Optional[GatheringItem]
+
+    def yield_gathering_items(self) -> Generator[GatheringItem, None, None]:
+        for index in range(8):
+            item = getattr(self, f"Item{index}")
+            if item is not None:
+                yield item

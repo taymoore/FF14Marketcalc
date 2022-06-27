@@ -15,13 +15,12 @@ from typing import (
 import requests
 import time
 import json, atexit
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from pydantic_collections import BaseCollectionModel
 from PySide6.QtCore import QMutex, QMutexLocker
 from xivapi.models import (
     ClassJob,
     ClassJobCollection,
-    GatheringItemLevelConvertTable,
     Item,
     Page,
     PageResult,
@@ -61,7 +60,12 @@ def get_content(content_name: str, t: R):
             break
     xivapi_mutex.unlock()
     if content_response is not None:
-        return t.parse_obj(content_response.json())
+        try:
+            return t.parse_obj(content_response.json())
+        except ValidationError as e:
+            print(f"'{content_name}' failed validation: {e}")
+            print(f"Content Response: {content_response.text}")
+            raise e
     else:
         raise RuntimeError("Failed to get content")
 

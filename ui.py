@@ -77,7 +77,6 @@ class MainWindow(QMainWindow):
             )
             self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
             self.verticalHeader().hide()
-
             self.setEditTriggers(QAbstractItemView.NoEditTriggers)
 
             # recipe_id -> row
