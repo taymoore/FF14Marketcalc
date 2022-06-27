@@ -39,6 +39,8 @@ xivapi_mutex = QMutex()
 R = TypeVar("R", bound=BaseModel)
 
 
+# TODO: Move this to QNetworkRequest
+# https://stackoverflow.com/a/59537535/
 def get_content(content_name: str, t: Optional[R] = None):
     if content_name[0] == "/":
         content_name = content_name[1:]

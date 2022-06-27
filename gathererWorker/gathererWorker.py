@@ -97,7 +97,7 @@ class GathererWorker(QThread):
     status_bar_update_signal = Signal(str)
     item_table_update_signal = Signal(GatheringItem, list, float, float)
     territory_table_update_signal = Signal(TerritoryType)
-    set_map_image_signal = Signal(str)
+    set_map_image_signal = Signal(QPixmap)
 
     def __init__(
         self,
@@ -128,6 +128,7 @@ class GathererWorker(QThread):
         self.territory_type_dict = PersistMapping[int, TerritoryType](
             "territory_type.bin"
         )
+        self.map_cache_dict: Dict[int, QPixmap] = {}
         super().__init__(parent)
 
     @Slot(bool)
@@ -148,14 +149,24 @@ class GathererWorker(QThread):
 
     @Slot(int)
     def update_map(self, territory_id: int) -> None:
+        if territory_id in self.map_cache_dict:
+            self.set_map_image_signal.emit(self.map_cache_dict[territory_id])
+            return
         territory_type = self.get_territory_type(territory_id)
         map_path = Path(f".data{territory_type.Map.MapFilename}")
-        map_path.parent.mkdir(parents=True, exist_ok=True)
         if not map_path.exists():
+            map_path.parent.mkdir(parents=True, exist_ok=True)
             print(f"Downloading {territory_type.Map.MapFilename}")
+            image_bytes = get_content(territory_type.Map.MapFilename)
             with open(map_path, "wb") as f:
-                f.write(get_content(territory_type.Map.MapFilename))
-        self.set_map_image_signal.emit(str(map_path))
+                f.write(image_bytes)
+        else:
+            with open(map_path, "rb") as f:
+                image_bytes = f.read()
+        pixmap = QPixmap()
+        pixmap.loadFromData(image_bytes)
+        self.map_cache_dict[territory_id] = pixmap
+        self.set_map_image_signal.emit(pixmap)
 
     def print_status(self, text: str):
         self.status_bar_update_signal.emit(text)
@@ -266,7 +277,7 @@ class GathererWorker(QThread):
                 # QCoreApplication.processEvents()
                 # if self.isInterruptionRequested():
                 #     return
-                print(f"Getting territory type {gathering_point.TerritoryTypeTargetID}")
+                # print(f"Getting territory type {gathering_point.TerritoryTypeTargetID}")
                 territory_type = self.get_territory_type(
                     gathering_point.TerritoryTypeTargetID
                 )
@@ -433,28 +444,25 @@ class GathererWindow(QMainWindow):
             for territory_id, row_data in self.table_data.items():
                 if row_data[0].row() == row:
                     self.update_map_signal.emit(territory_id)
-                    break
+                    return
+            print(f"Row {row} not found. Looking for {self.item(row, column).text()}")
 
     class Map(QWidget):
         def __init__(self):
             super().__init__()
-            # self.setScaledContents(True)
             self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
             self.pixmap = QPixmap()
-            # self.setAlignment(Qt.AlignCenter)
-            # self.setPixmap(QPixmap())
 
         @Slot(str)
-        def set_map_image(self, image_path: str) -> None:
-            print(f"Setting map image to {image_path}")
-            self.pixmap = QPixmap(image_path)
-            # painter.drawPixmap(self.rect(), pixmap)
-            # self.setPixmap(QPixmap(image_path))
+        def set_map_image(self, pixmap: QPixmap) -> None:
+            print("Setting map image")
+            self.pixmap = pixmap
+            self.update()
 
         def paintEvent(self, event: QPaintEvent) -> None:
             painter = QPainter(self)
             painter.drawPixmap(self.rect(), self.pixmap)
-            # super().paintEvent(event)
+            super().paintEvent(event)
 
     set_auto_refresh_signal = Signal(bool)
 
