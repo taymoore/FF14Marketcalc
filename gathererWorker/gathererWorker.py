@@ -1,7 +1,9 @@
 from asyncio import gather
 import json
 import logging
+import requests
 from operator import mod
+from pathlib import Path
 from pydantic import BaseModel
 from scipy import stats
 from typing import Dict, List, Optional, Tuple
@@ -19,8 +21,9 @@ from PySide6.QtCore import (
     QObject,
     QCoreApplication,
 )
-from PySide6.QtGui import QBrush, QColor
+from PySide6.QtGui import QBrush, QColor, QImage, QPixmap, QPainter, QPaintEvent
 from PySide6.QtWidgets import (
+    QSizePolicy,
     QTableWidget,
     QApplication,
     QWidget,
@@ -94,6 +97,7 @@ class GathererWorker(QThread):
     status_bar_update_signal = Signal(str)
     item_table_update_signal = Signal(GatheringItem, list, float, float)
     territory_table_update_signal = Signal(TerritoryType)
+    set_map_image_signal = Signal(str)
 
     def __init__(
         self,
@@ -103,11 +107,15 @@ class GathererWorker(QThread):
     ) -> None:
         self.world_id = world_id
 
+        self.auto_refresh_enabled = True
+        self.user_selected_item_id = None
+        self.user_selected_territory_id = None
+
         self.classjob_config_dict = classjob_config_dict
         self.classjob_level_current_dict: Dict[int, int] = {}
 
         self.gathering_items_cache_filename = "gathering_items.bin"
-        self.gathering_items = load_cache(
+        self.gathering_items_dict = load_cache(
             self.gathering_items_cache_filename,
             GathererWorker.GatheringItems(gathering_items={}),
         )
@@ -122,34 +130,66 @@ class GathererWorker(QThread):
         )
         super().__init__(parent)
 
+    @Slot(bool)
+    def set_auto_refresh(self, auto_refresh_enabled: bool) -> None:
+        self.user_selected_item_id = None
+        self.user_selected_territory_id = None
+        self.auto_refresh_enabled = auto_refresh_enabled
+        if self.auto_refresh_enabled:
+            for gathering_item in self.gathering_items_dict.values():
+                QCoreApplication.processEvents()
+                if self.isInterruptionRequested():
+                    return
+                self.update_table_item(gathering_item)
+                QCoreApplication.processEvents()
+                if self.isInterruptionRequested():
+                    return
+                self.update_table_territory(gathering_item)
+
+    @Slot(int)
+    def update_map(self, territory_id: int) -> None:
+        territory_type = self.get_territory_type(territory_id)
+        map_path = Path(f".data{territory_type.Map.MapFilename}")
+        map_path.parent.mkdir(parents=True, exist_ok=True)
+        if not map_path.exists():
+            print(f"Downloading {territory_type.Map.MapFilename}")
+            with open(map_path, "wb") as f:
+                f.write(get_content(territory_type.Map.MapFilename))
+        self.set_map_image_signal.emit(str(map_path))
+
     def print_status(self, text: str):
         self.status_bar_update_signal.emit(text)
 
     def yield_gathering_item(self) -> GatheringItem:
-        for gathering_item in self.gathering_items.gathering_items.values():
+        for gathering_item in self.gathering_items_dict.gathering_items.values():
             yield gathering_item
-        page = get_page("GatheringItem", self.gathering_items.results_pulled // 100 + 1)
-        self.gathering_items.results_max = page.Pagination.ResultsTotal
+        page = get_page(
+            "GatheringItem", self.gathering_items_dict.results_pulled // 100 + 1
+        )
+        self.gathering_items_dict.results_max = page.Pagination.ResultsTotal
         for index in range(
-            self.gathering_items.results_pulled, self.gathering_items.results_max
+            self.gathering_items_dict.results_pulled,
+            self.gathering_items_dict.results_max,
         ):
             self.print_status(
-                f"Getting gathering item {index+1}/{self.gathering_items.results_max}..."
+                f"Getting gathering item {index+1}/{self.gathering_items_dict.results_max}..."
             )
             if not index % 100:
                 print(f"getting page {index//100+1}")
                 page = get_page("GatheringItem", index // 100 + 1)
-                self.gathering_items.results_max = page.Pagination.ResultsTotal
+                self.gathering_items_dict.results_max = page.Pagination.ResultsTotal
             print(
-                f"Getting item {index % 100} from page {self.gathering_items.results_pulled // 100 + 1}"
+                f"Getting item {index % 100} from page {self.gathering_items_dict.results_pulled // 100 + 1}"
             )
             gathering_item: GatheringItem = get_content(
                 page.Results[index % 100].Url, GatheringItem
             )
-            self.gathering_items.results_pulled += 1
+            self.gathering_items_dict.results_pulled += 1
             if gathering_item.Item is None:
                 continue
-            self.gathering_items.gathering_items[gathering_item.ID] = gathering_item
+            self.gathering_items_dict.gathering_items[
+                gathering_item.ID
+            ] = gathering_item
             yield gathering_item
 
     def get_gathering_point_base(
@@ -184,7 +224,10 @@ class GathererWorker(QThread):
         ) in (
             gathering_item.GameContentLinks.GatheringPointBase.yield_gathering_point_base_id()
         ):
-            print(f"Getting gathering point base {gathering_point_base_id}")
+            QCoreApplication.processEvents()
+            if self.isInterruptionRequested():
+                return
+            # print(f"Getting gathering point base {gathering_point_base_id}")
             gathering_point_base_list.append(
                 self.get_gathering_point_base(gathering_point_base_id)
             )
@@ -204,7 +247,7 @@ class GathererWorker(QThread):
             QCoreApplication.processEvents()
             if self.isInterruptionRequested():
                 return
-            print(f"Getting gathering point base {gathering_point_base_id}")
+            # print(f"Getting gathering point base {gathering_point_base_id}")
             gathering_point_base = self.get_gathering_point_base(
                 gathering_point_base_id
             )
@@ -216,7 +259,7 @@ class GathererWorker(QThread):
                 QCoreApplication.processEvents()
                 if self.isInterruptionRequested():
                     return
-                print(f"Getting gathering point {gathering_point_id}")
+                # print(f"Getting gathering point {gathering_point_id}")
                 gathering_point = self.get_gathering_point(gathering_point_id)
                 if gathering_point.TerritoryTypeTargetID == 1:
                     continue
@@ -249,7 +292,7 @@ class GathererWorker(QThread):
 
     def stop(self):
         print("Stopping gatherer worker")
-        save_cache(self.gathering_items_cache_filename, self.gathering_items)
+        save_cache(self.gathering_items_cache_filename, self.gathering_items_dict)
         self.gathering_point_base_dict.save_to_disk()
         self.gathering_point_dict.save_to_disk()
         self.territory_type_dict.save_to_disk()
@@ -337,7 +380,7 @@ class GathererWindow(QMainWindow):
                 row.append(
                     QTableWidgetItem(f"{min_lvl}" if min_lvl is not None else "")
                 )
-                row.append(QTableWidgetFloatItem(gathering_item.Item.Name))
+                row.append(QTableWidgetItem(gathering_item.Item.Name))
                 row.append(QTableWidgetFloatItem(f"{profit:,.0f}"))
                 row.append(QTableWidgetFloatItem(f"{velocity:.2f}"))
                 row.append(QTableWidgetFloatItem(f"{profit * velocity:,.0f}"))
@@ -352,6 +395,8 @@ class GathererWindow(QMainWindow):
             self.sortItems(5, Qt.DescendingOrder)
 
     class TerritoryTableWidget(QTableWidget):
+        update_map_signal = Signal(int)
+
         def __init__(self, parent: QWidget):
             super().__init__(parent)
             self.setColumnCount(1)
@@ -361,6 +406,8 @@ class GathererWindow(QMainWindow):
             self.setEditTriggers(QAbstractItemView.NoEditTriggers)
 
             self.table_data: Dict[int, List[QTableWidgetItem]] = {}
+
+            self.cellClicked.connect(self.on_cell_clicked)
 
         def clear_contents(self) -> None:
             self.clearContents()
@@ -374,11 +421,42 @@ class GathererWindow(QMainWindow):
         ) -> None:
             if territory_type.ID not in self.table_data:
                 row: List[QTableWidgetItem] = []
-                row.append(QTableWidgetFloatItem(territory_type.PlaceName.Name))
+                row.append(QTableWidgetItem(territory_type.PlaceName.Name))
                 self.insertRow(self.rowCount())
                 self.setItem(self.rowCount() - 1, 0, row[0])
                 self.table_data[territory_type.ID] = row
             self.sortItems(0, Qt.DescendingOrder)
+
+        @Slot(int, int)
+        def on_cell_clicked(self, row: int, column: int) -> None:
+            print(f"Clicked on {self.item(row, column).text()}")
+            for territory_id, row_data in self.table_data.items():
+                if row_data[0].row() == row:
+                    self.update_map_signal.emit(territory_id)
+                    break
+
+    class Map(QWidget):
+        def __init__(self):
+            super().__init__()
+            # self.setScaledContents(True)
+            self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            self.pixmap = QPixmap()
+            # self.setAlignment(Qt.AlignCenter)
+            # self.setPixmap(QPixmap())
+
+        @Slot(str)
+        def set_map_image(self, image_path: str) -> None:
+            print(f"Setting map image to {image_path}")
+            self.pixmap = QPixmap(image_path)
+            # painter.drawPixmap(self.rect(), pixmap)
+            # self.setPixmap(QPixmap(image_path))
+
+        def paintEvent(self, event: QPaintEvent) -> None:
+            painter = QPainter(self)
+            painter.drawPixmap(self.rect(), self.pixmap)
+            # super().paintEvent(event)
+
+    set_auto_refresh_signal = Signal(bool)
 
     def __init__(
         self,
@@ -390,8 +468,14 @@ class GathererWindow(QMainWindow):
         self.setCentralWidget(self.main_widget)
         self.main_layout = QVBoxLayout()
         self.main_widget.setLayout(self.main_layout)
-        self.classjob_level_layout = QHBoxLayout()
-        self.main_layout.addLayout(self.classjob_level_layout)
+
+        self.options_layout = QHBoxLayout()
+        self.main_layout.addLayout(self.options_layout)
+
+        self.refresh_button = QPushButton()
+        self.refresh_button.setText("Refresh")
+        self.refresh_button.clicked.connect(self.on_refresh_button_clicked)
+
         self.centre_splitter = QSplitter()
         self.main_layout.addWidget(self.centre_splitter)
 
@@ -403,6 +487,10 @@ class GathererWindow(QMainWindow):
 
         self.territory_table = GathererWindow.TerritoryTableWidget(self)
         self.centre_splitter.addWidget(self.territory_table)
+        # self.territory_table.cellClicked.connect(self.on_territory_table_cell_clicked)
+
+        self.map = GathererWindow.Map()
+        self.centre_splitter.addWidget(self.map)
 
         # Workers
         self.classjob_config_dict = PersistMapping[int, ClassJobConfig](
@@ -427,8 +515,19 @@ class GathererWindow(QMainWindow):
         self.gatherer_worker.territory_table_update_signal.connect(
             self.territory_table.on_item_table_update
         )
+        self.territory_table.update_map_signal.connect(self.gatherer_worker.update_map)
+        self.set_auto_refresh_signal.connect(self.gatherer_worker.set_auto_refresh)
+        self.gatherer_worker.set_map_image_signal.connect(self.map.set_map_image)
 
         self.gatherer_worker.start(QThread.LowPriority)
+
+    @Slot()
+    def on_refresh_button_clicked(self):
+        self.set_auto_refresh_signal.emit(True)
+
+    # @Slot(int, int)
+    # def on_territory_table_cell_clicked(self, row: int, column: int) -> None:
+    #     pass
 
     def closeEvent(self, event) -> None:
         print("exiting Gatherer...")

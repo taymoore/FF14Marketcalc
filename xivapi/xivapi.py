@@ -39,7 +39,7 @@ xivapi_mutex = QMutex()
 R = TypeVar("R", bound=BaseModel)
 
 
-def get_content(content_name: str, t: R):
+def get_content(content_name: str, t: Optional[R] = None):
     if content_name[0] == "/":
         content_name = content_name[1:]
     url = f"https://xivapi.com/{content_name}"
@@ -61,7 +61,11 @@ def get_content(content_name: str, t: R):
     xivapi_mutex.unlock()
     if content_response is not None:
         try:
-            return t.parse_obj(content_response.json())
+            if t is not None:
+                return t.parse_obj(content_response.json())
+            else:
+                print(f"size of response: {len(content_response.content)}")
+                return content_response.content
         except ValidationError as e:
             print(f"'{content_name}' failed validation: {e}")
             print(f"Content Response: {content_response.text}")
