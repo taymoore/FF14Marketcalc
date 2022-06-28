@@ -6,7 +6,7 @@ from operator import mod
 from pathlib import Path
 from pydantic import BaseModel
 from scipy import stats
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 import pandas as pd
 import numpy as np
 import pyperclip
@@ -98,6 +98,7 @@ class GathererWorker(QThread):
     item_table_update_signal = Signal(GatheringItem, list, float, float)
     territory_table_update_signal = Signal(TerritoryType)
     set_map_image_signal = Signal(QPixmap)
+    draw_gathering_point_signal = Signal(float, float, float)  # X, Y, radius
 
     def __init__(
         self,
@@ -128,6 +129,9 @@ class GathererWorker(QThread):
         self.territory_type_dict = PersistMapping[int, TerritoryType](
             "territory_type.bin"
         )
+        # self.gathering_item_to_territory_dict: Dict[int, Set[int]] = {}
+        # self.territory_to_gathering_item_dict: Dict[int, Set[int]] = {}
+        self.territory_to_gathering_point_dict: Dict[int, Set[int]] = {}
         self.map_cache_dict: Dict[int, QPixmap] = {}
         super().__init__(parent)
 
@@ -147,26 +151,37 @@ class GathererWorker(QThread):
                     return
                 self.update_table_territory(gathering_item)
 
+    def add_gathering_point_to_map(self, gathering_point: GatheringPoint) -> None:
+        self.draw_gathering_point_signal.emit(
+            gathering_point.ExportedGatheringPoint.X,
+            gathering_point.ExportedGatheringPoint.Y,
+            gathering_point.ExportedGatheringPoint.Radius,
+        )
+
     @Slot(int)
     def update_map(self, territory_id: int) -> None:
         if territory_id in self.map_cache_dict:
             self.set_map_image_signal.emit(self.map_cache_dict[territory_id])
-            return
-        territory_type = self.get_territory_type(territory_id)
-        map_path = Path(f".data{territory_type.Map.MapFilename}")
-        if not map_path.exists():
-            map_path.parent.mkdir(parents=True, exist_ok=True)
-            print(f"Downloading {territory_type.Map.MapFilename}")
-            image_bytes = get_content(territory_type.Map.MapFilename)
-            with open(map_path, "wb") as f:
-                f.write(image_bytes)
         else:
-            with open(map_path, "rb") as f:
-                image_bytes = f.read()
-        pixmap = QPixmap()
-        pixmap.loadFromData(image_bytes)
-        self.map_cache_dict[territory_id] = pixmap
-        self.set_map_image_signal.emit(pixmap)
+            territory_type = self.get_territory_type(territory_id)
+            map_path = Path(f".data{territory_type.Map.MapFilename}")
+            if not map_path.exists():
+                map_path.parent.mkdir(parents=True, exist_ok=True)
+                print(f"Downloading {territory_type.Map.MapFilename}")
+                image_bytes = get_content(territory_type.Map.MapFilename)
+                with open(map_path, "wb") as f:
+                    f.write(image_bytes)
+            else:
+                with open(map_path, "rb") as f:
+                    image_bytes = f.read()
+            pixmap = QPixmap()
+            pixmap.loadFromData(image_bytes)
+            self.map_cache_dict[territory_id] = pixmap
+            self.set_map_image_signal.emit(pixmap)
+        for gathering_point_id in self.territory_to_gathering_point_dict[territory_id]:
+            self.add_gathering_point_to_map(
+                self.get_gathering_point(gathering_point_id)
+            )
 
     def print_status(self, text: str):
         self.status_bar_update_signal.emit(text)
@@ -249,7 +264,7 @@ class GathererWorker(QThread):
         )
 
     def update_table_territory(self, gathering_item: GatheringItem) -> None:
-        territory_type_list = []
+        territory_type_set = set()
         for (
             gathering_point_base_id
         ) in (
@@ -258,7 +273,6 @@ class GathererWorker(QThread):
             QCoreApplication.processEvents()
             if self.isInterruptionRequested():
                 return
-            # print(f"Getting gathering point base {gathering_point_base_id}")
             gathering_point_base = self.get_gathering_point_base(
                 gathering_point_base_id
             )
@@ -270,21 +284,29 @@ class GathererWorker(QThread):
                 QCoreApplication.processEvents()
                 if self.isInterruptionRequested():
                     return
-                # print(f"Getting gathering point {gathering_point_id}")
                 gathering_point = self.get_gathering_point(gathering_point_id)
                 if gathering_point.TerritoryTypeTargetID == 1:
                     continue
                 # QCoreApplication.processEvents()
                 # if self.isInterruptionRequested():
                 #     return
-                # print(f"Getting territory type {gathering_point.TerritoryTypeTargetID}")
                 territory_type = self.get_territory_type(
                     gathering_point.TerritoryTypeTargetID
                 )
-                if territory_type not in territory_type_list:
-                    territory_type_list.append(territory_type)
-        for territory_type in territory_type_list:
-            self.territory_table_update_signal.emit(territory_type)
+                territory_type_set.add(gathering_point.TerritoryTypeTargetID)
+                self.territory_to_gathering_point_dict.setdefault(
+                    territory_type.ID, set()
+                ).add(gathering_point_id)
+                # self.territory_to_gathering_item_dict.setdefault(
+                #     territory_type.ID, set()
+                # ).add(gathering_item.ID)
+        # self.gathering_item_to_territory_dict.setdefault(
+        #     gathering_item.ID, set()
+        # ).update(territory_type_set)
+        for territory_type_id in territory_type_set:
+            self.territory_table_update_signal.emit(
+                self.get_territory_type(territory_type_id)
+            )
 
     def run(self):
         print("Starting gatherer worker")
@@ -453,15 +475,35 @@ class GathererWindow(QMainWindow):
             self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
             self.pixmap = QPixmap()
 
+            self.gathering_point_set: Set[Tuple[float, float, float]] = set()
+
         @Slot(str)
         def set_map_image(self, pixmap: QPixmap) -> None:
+            # This will clear gathering point list
             print("Setting map image")
+            self.gathering_point_set.clear()
             self.pixmap = pixmap
+            self.update()
+
+        @Slot(float, float, float)
+        def add_gathering_point(self, x: float, y: float, radius: float) -> None:
+            self.gathering_point_set.add((x, y, radius))
             self.update()
 
         def paintEvent(self, event: QPaintEvent) -> None:
             painter = QPainter(self)
             painter.drawPixmap(self.rect(), self.pixmap)
+            if not self.pixmap.isNull():
+                x_scale = self.width() / self.pixmap.width()
+                y_scale = self.height() / self.pixmap.height()
+                painter.setPen(QColor(0, 0, 255, 100))
+                painter.setBrush(QColor(0, 0, 255, 50))
+                for gathering_point in self.gathering_point_set:
+                    x = (self.pixmap.width() / 2 + gathering_point[0]) * x_scale
+                    y = (self.pixmap.height() / 2 + gathering_point[1]) * y_scale
+                    x_radius = gathering_point[2] * x_scale
+                    y_radius = gathering_point[2] * y_scale
+                    painter.drawEllipse(x, y, x_radius, y_radius)
             super().paintEvent(event)
 
     set_auto_refresh_signal = Signal(bool)
@@ -526,6 +568,9 @@ class GathererWindow(QMainWindow):
         self.territory_table.update_map_signal.connect(self.gatherer_worker.update_map)
         self.set_auto_refresh_signal.connect(self.gatherer_worker.set_auto_refresh)
         self.gatherer_worker.set_map_image_signal.connect(self.map.set_map_image)
+        self.gatherer_worker.draw_gathering_point_signal.connect(
+            self.map.add_gathering_point
+        )
 
         self.gatherer_worker.start(QThread.LowPriority)
 
