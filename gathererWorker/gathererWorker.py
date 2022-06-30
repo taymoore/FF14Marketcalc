@@ -107,6 +107,7 @@ class GathererWorker(QThread):
     territory_table_update_signal = Signal(TerritoryType)
     set_map_image_signal = Signal(QPixmap)
     draw_gathering_point_signal = Signal(float, float, float)  # X, Y, radius
+    gathering_item_to_territory_changed_signal = Signal(dict)
 
     def __init__(
         self,
@@ -137,9 +138,10 @@ class GathererWorker(QThread):
         self.territory_type_dict = PersistMapping[int, TerritoryType](
             "territory_type.bin"
         )
-        # self.gathering_item_to_territory_dict: Dict[int, Set[int]] = {}
         # self.territory_to_gathering_item_dict: Dict[int, Set[int]] = {}
         self.territory_to_gathering_point_dict: Dict[int, Set[int]] = {}
+        self.gathering_item_to_territory_dict: Dict[int, Set[int]] = {}
+        # self.territory_to_gathering_items_dict: Dict[int, Set[int]] = {}
         self.map_cache_dict: Dict[int, QPixmap] = {}
         super().__init__(parent)
 
@@ -326,6 +328,18 @@ class GathererWorker(QThread):
                 self.territory_to_gathering_point_dict.setdefault(
                     territory_type.ID, set()
                 ).add(gathering_point_id)
+                if (
+                    territory_type.ID
+                    not in self.gathering_item_to_territory_dict.setdefault(
+                        gathering_item.ID, set()
+                    )
+                ):
+                    self.gathering_item_to_territory_dict[gathering_item.ID].add(
+                        territory_type.ID
+                    )
+                    self.gathering_item_to_territory_changed_signal.emit(
+                        self.gathering_item_to_territory_dict
+                    )
                 # self.territory_to_gathering_item_dict.setdefault(
                 #     territory_type.ID, set()
                 # ).add(gathering_item.ID)
@@ -362,6 +376,9 @@ class GathererWorker(QThread):
 
 class GathererWindow(QMainWindow):
     class ItemsTableWidget(QTableWidget):
+        gathering_item_filter_added_signal = Signal(set)
+        gathering_item_filter_removed_signal = Signal(set)
+
         def __init__(self, parent: QWidget):
             super().__init__(parent)
             self.setColumnCount(6)
@@ -371,9 +388,13 @@ class GathererWindow(QMainWindow):
             self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
             self.verticalHeader().hide()
             self.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            self.setSelectionMode(QAbstractItemView.MultiSelection)
+            self.setSelectionBehavior(QAbstractItemView.SelectRows)
+            self.cellClicked.connect(self.on_cell_clicked)
 
-            # item_id -> row
-            self.table_data: Dict[int, List[QTableWidgetItem]] = {}
+            self.table_data: Dict[
+                int, List[QTableWidgetItem]
+            ] = {}  # key: gathering_item.ID
 
         def clear_contents(self) -> None:
             self.clearContents()
@@ -456,6 +477,22 @@ class GathererWindow(QMainWindow):
                 self.table_data[gathering_item.ID] = row
             self.sortItems(5, Qt.DescendingOrder)
 
+        @Slot(int, int)
+        def on_cell_clicked(self, row: int, column: int):
+            gathering_item_found = False
+            for gathering_item_id, row_data in self.table_data.items():
+                if row_data[0].row() == row:
+                    gathering_item_found = True
+                    break
+            if not gathering_item_found:
+                raise Exception(
+                    f"Gathering item {gathering_item_id} not found on row {row}"
+                )
+            if any(row_data[i].isSelected() for i in range(6)):
+                self.gathering_item_filter_added_signal.emit(gathering_item_id)
+            else:
+                self.gathering_item_filter_removed_signal.emit(gathering_item_id)
+
     class TerritoryTableView(QTableView):
         def __init__(self, parent: Optional[QWidget] = None) -> None:
             super().__init__(parent)
@@ -463,6 +500,61 @@ class GathererWindow(QMainWindow):
             self.verticalHeader().hide()
             self.setEditTriggers(QAbstractItemView.NoEditTriggers)
             # self.setSortingEnabled(True)
+
+    class TerritoryTableProxyModel(QSortFilterProxyModel):
+        def __init__(self, parent: Optional[QWidget] = None) -> None:
+            super().__init__(parent)
+            self.setDynamicSortFilter(True)
+            self.setFilterCaseSensitivity(Qt.CaseInsensitive)
+            self.gathering_item_to_territory_dict: Dict[
+                int, Set[int]
+            ] = {}  # key: gathering_item.ID, value: territory_type.ID
+            self.gathering_item_filter_set: Set[int] = set()
+            self.territory_filter_set: Set[int] = set()
+
+        def filterAcceptsRow(
+            self,
+            source_row: int,
+            source_parent: Union[QModelIndex, QPersistentModelIndex],
+        ) -> bool:
+            source_model = self.sourceModel()
+            assert isinstance(source_model, GathererWindow.TerritoryTableModel)
+            if (
+                len(self.gathering_item_filter_set) == 0
+                or source_model.territory_id_list[source_row]
+                in self.territory_filter_set
+            ):
+                return super().filterAcceptsRow(source_row, source_parent)
+            return False
+
+        def invalidateRowsFilter(self) -> None:
+            territory_filter_set: Set[int] = set()
+            for gathering_item_id in self.gathering_item_filter_set:
+                territory_filter_set.update(
+                    self.gathering_item_to_territory_dict[gathering_item_id]
+                )
+            if territory_filter_set != self.territory_filter_set:
+                self.territory_filter_set = territory_filter_set
+                return super().invalidateRowsFilter()
+
+        @Slot(dict)
+        def on_gathering_item_to_territory_dict_changed(
+            self, gathering_item_to_territory_dict: Dict[int, Set[int]]
+        ) -> None:
+            self.gathering_item_to_territory_dict = gathering_item_to_territory_dict
+            self.invalidateRowsFilter()
+
+        @Slot(int)
+        def gathering_item_filter_added(self, gathering_item_id: int) -> None:
+            if gathering_item_id not in self.gathering_item_filter_set:
+                self.gathering_item_filter_set.add(gathering_item_id)
+                self.invalidateRowsFilter()
+
+        @Slot(int)
+        def gathering_item_filter_removed(self, gathering_item_id: int) -> None:
+            if gathering_item_id in self.gathering_item_filter_set:
+                self.gathering_item_filter_set.remove(gathering_item_id)
+                self.invalidateRowsFilter()
 
     class TerritoryTableModel(QAbstractTableModel):
         update_map_signal = Signal(int)
@@ -610,10 +702,16 @@ class GathererWindow(QMainWindow):
         # TODO: Review delegate for sorting unique https://stackoverflow.com/questions/53324931/qsortfilterproxymodel-by-column-value
         self.territory_table_model = GathererWindow.TerritoryTableModel(self)
         self.territory_table_view = GathererWindow.TerritoryTableView(self)
-        self.territory_table_proxy_model = QSortFilterProxyModel(self)
+        self.territory_table_proxy_model = GathererWindow.TerritoryTableProxyModel(self)
         self.territory_table_proxy_model.sort(0, Qt.AscendingOrder)
         self.territory_search_lineedit.textChanged.connect(
-            self.on_line_edit_text_changed
+            self.territory_table_proxy_model.setFilterRegularExpression
+        )
+        self.item_table.gathering_item_filter_added_signal.connect(
+            self.territory_table_proxy_model.gathering_item_filter_added
+        )
+        self.item_table.gathering_item_filter_removed_signal.connect(
+            self.territory_table_proxy_model.gathering_item_filter_removed
         )
         self.territory_table_proxy_model.setSourceModel(self.territory_table_model)
         self.territory_table_view.setModel(self.territory_table_proxy_model)
@@ -658,21 +756,15 @@ class GathererWindow(QMainWindow):
         self.gatherer_worker.draw_gathering_point_signal.connect(
             self.map.add_gathering_point
         )
+        self.gatherer_worker.gathering_item_to_territory_changed_signal.connect(
+            self.territory_table_proxy_model.on_gathering_item_to_territory_dict_changed
+        )
 
         self.gatherer_worker.start(QThread.LowPriority)
 
     @Slot()
     def on_refresh_button_clicked(self):
         self.set_auto_refresh_signal.emit(True)
-
-    @Slot()
-    def on_line_edit_text_changed(self):
-        self.territory_table_proxy_model.setFilterRegularExpression(
-            QRegularExpression(
-                self.territory_search_lineedit.text(),
-                QRegularExpression.CaseInsensitiveOption,
-            )
-        )
 
     def closeEvent(self, event) -> None:
         print("exiting Gatherer...")
