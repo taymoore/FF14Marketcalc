@@ -160,7 +160,7 @@ recipe_classjob_level_list = PersistMapping[int, Dict[int, List[str]]](
 def yield_recipes(
     classjob_id: int, classjob_level: int
 ) -> Generator[Recipe, None, None]:
-    print(f"yield_recipes: {classjob_id} {classjob_level}")
+    # print(f"yield_recipes: {classjob_id} {classjob_level}")
     recipe_classjob_level_list_mutex.lock()
     url_list: List[str]
     if (

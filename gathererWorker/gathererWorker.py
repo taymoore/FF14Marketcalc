@@ -6,11 +6,12 @@ from operator import mod
 from pathlib import Path
 from pydantic import BaseModel
 from scipy import stats
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple, Union
 import pandas as pd
 import numpy as np
 import pyperclip
 from PySide6.QtCore import (
+    QSortFilterProxyModel,
     Slot,
     Signal,
     QSize,
@@ -20,9 +21,13 @@ from PySide6.QtCore import (
     QBasicTimer,
     QObject,
     QCoreApplication,
+    QAbstractTableModel,
+    QModelIndex,
+    QPersistentModelIndex,
 )
 from PySide6.QtGui import QBrush, QColor, QImage, QPixmap, QPainter, QPaintEvent
 from PySide6.QtWidgets import (
+    QTableView,
     QSizePolicy,
     QTableWidget,
     QApplication,
@@ -110,7 +115,7 @@ class GathererWorker(QThread):
     ) -> None:
         self.world_id = world_id
 
-        self.auto_refresh_enabled = True
+        # self.auto_refresh_enabled = True
         self.user_selected_item_id = None
         self.user_selected_territory_id = None
 
@@ -141,17 +146,17 @@ class GathererWorker(QThread):
     def set_auto_refresh(self, auto_refresh_enabled: bool) -> None:
         self.user_selected_item_id = None
         self.user_selected_territory_id = None
-        self.auto_refresh_enabled = auto_refresh_enabled
-        if self.auto_refresh_enabled:
-            for gathering_item in self.gathering_items_dict.gathering_items.values():
-                QCoreApplication.processEvents()
-                if self.isInterruptionRequested():
-                    return
-                self.update_table_item(gathering_item)
-                QCoreApplication.processEvents()
-                if self.isInterruptionRequested():
-                    return
-                self.update_table_territory(gathering_item)
+        # self.auto_refresh_enabled = auto_refresh_enabled
+        # if self.auto_refresh_enabled:
+        #     for gathering_item in self.gathering_items_dict.gathering_items.values():
+        #         QCoreApplication.processEvents()
+        #         if self.isInterruptionRequested():
+        #             return
+        #         self.update_table_item(gathering_item)
+        #         QCoreApplication.processEvents()
+        #         if self.isInterruptionRequested():
+        #             return
+        #         self.update_table_territory(gathering_item)
 
     def add_gathering_point_to_map(self, gathering_point: GatheringPoint) -> None:
         if (
@@ -333,18 +338,17 @@ class GathererWorker(QThread):
 
     def run(self):
         print("Starting gatherer worker")
-        while not self.isInterruptionRequested():
-            for gathering_item in self.yield_gathering_item():
-                QCoreApplication.processEvents()
-                if self.isInterruptionRequested():
-                    return
-                # print("Updating table item")
-                self.update_table_item(gathering_item)
-                QCoreApplication.processEvents()
-                if self.isInterruptionRequested():
-                    return
-                # print("Updating table territory")
-                self.update_table_territory(gathering_item)
+        for gathering_item in self.yield_gathering_item():
+            QCoreApplication.processEvents()
+            if self.isInterruptionRequested():
+                return
+            # print("Updating table item")
+            self.update_table_item(gathering_item)
+            QCoreApplication.processEvents()
+            if self.isInterruptionRequested():
+                return
+            # print("Updating table territory")
+            self.update_table_territory(gathering_item)
 
     def stop(self):
         print("Stopping gatherer worker")
@@ -451,7 +455,85 @@ class GathererWindow(QMainWindow):
                 self.table_data[gathering_item.ID] = row
             self.sortItems(5, Qt.DescendingOrder)
 
-    class TerritoryTableWidget(QTableWidget):
+    class TerritoryTableView(QTableView):
+        def __init__(self, parent: Optional[QWidget] = None) -> None:
+            super().__init__(parent)
+            self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+            self.verticalHeader().hide()
+            self.setEditTriggers(QAbstractItemView.NoEditTriggers)
+
+    class TerritoryTableModel(QAbstractTableModel):
+        update_map_signal = Signal(int)
+
+        def __init__(self, parent: Optional[QObject] = None) -> None:
+            super().__init__(parent)
+            self.table_data: List[List[Union[QTableWidgetItem, int]]] = []
+            self.header_data: List[str] = ["Name"]
+
+        def rowCount(
+            self, parent: Union[QModelIndex, QPersistentModelIndex] = None
+        ) -> int:
+            return len(self.table_data)
+
+        def columnCount(
+            self, parent: Union[QModelIndex, QPersistentModelIndex] = None
+        ) -> int:
+            return 1
+
+        def data(  # type: ignore[override]
+            self,
+            index: QModelIndex,
+            role: Qt.ItemDataRole = Qt.DisplayRole,
+        ) -> Optional[Union[QTableWidgetItem, int]]:
+            if not index.isValid():
+                return None
+            if role == Qt.DisplayRole:
+                try:
+                    return self.table_data[index.row()][index.column()]
+                except KeyError as e:
+                    print(f"row: {index.row()} column: {index.column()}")
+                    print(f"Table data: {self.table_data}")
+                    raise e
+            return None
+
+        def headerData(  # type: ignore[override]
+            self,
+            section: int,
+            orientation: Qt.Orientation,
+            role: Qt.ItemDataRole = Qt.DisplayRole,
+        ) -> Optional[str]:
+            if orientation == Qt.Horizontal and role == Qt.DisplayRole:
+                return self.header_data[section]
+            return None
+
+        def clear_contents(self) -> None:
+            self.beginRemoveRows(QModelIndex(), 0, self.rowCount())
+            self.table_data.clear()
+            self.endRemoveRows()
+
+        @Slot(TerritoryType)
+        def on_item_table_update(
+            self,
+            territory_type: TerritoryType,
+        ) -> None:
+            for _row in self.table_data:
+                if _row[-1] == territory_type.ID:
+                    return
+            self.beginInsertRows(QModelIndex(), self.rowCount(), self.rowCount())
+            # row: List[Union[QTableWidgetItem, int]] = []
+            row = []
+            row.append(territory_type.PlaceName.Name)
+            row.append(territory_type.ID)
+            self.table_data.append(row)
+            self.endInsertRows()
+            # self.sortItems(0, Qt.DescendingOrder)
+
+        @Slot(int, int)
+        def on_cell_clicked(self, item: QModelIndex) -> None:
+            print(f"Clicked on {item.row()} {item.column()}, {item.data()}")
+            self.update_map_signal.emit(self.table_data[item.row()][-1])
+
+    class TerritoryTableWidget_(QTableWidget):
         update_map_signal = Signal(int)
 
         def __init__(self, parent: QWidget):
@@ -470,28 +552,6 @@ class GathererWindow(QMainWindow):
             self.clearContents()
             self.setRowCount(0)
             self.table_data.clear()
-
-        @Slot(TerritoryType)
-        def on_item_table_update(
-            self,
-            territory_type: TerritoryType,
-        ) -> None:
-            if territory_type.ID not in self.table_data:
-                row: List[QTableWidgetItem] = []
-                row.append(QTableWidgetItem(territory_type.PlaceName.Name))
-                self.insertRow(self.rowCount())
-                self.setItem(self.rowCount() - 1, 0, row[0])
-                self.table_data[territory_type.ID] = row
-            self.sortItems(0, Qt.DescendingOrder)
-
-        @Slot(int, int)
-        def on_cell_clicked(self, row: int, column: int) -> None:
-            print(f"Clicked on {self.item(row, column).text()}")
-            for territory_id, row_data in self.table_data.items():
-                if row_data[0].row() == row:
-                    self.update_map_signal.emit(territory_id)
-                    return
-            print(f"Row {row} not found. Looking for {self.item(row, column).text()}")
 
     class Map(QWidget):
         def __init__(self):
@@ -548,8 +608,12 @@ class GathererWindow(QMainWindow):
         self.main_layout.addLayout(self.options_layout)
 
         self.refresh_button = QPushButton()
+        self.options_layout.addWidget(self.refresh_button)
         self.refresh_button.setText("Refresh")
         self.refresh_button.clicked.connect(self.on_refresh_button_clicked)  # type: ignore
+
+        self.territory_search_lineedit = QLineEdit()
+        self.options_layout.addWidget(self.territory_search_lineedit)
 
         self.centre_splitter = QSplitter()
         self.main_layout.addWidget(self.centre_splitter)
@@ -560,12 +624,20 @@ class GathererWindow(QMainWindow):
         self.item_table = GathererWindow.ItemsTableWidget(self)
         self.centre_splitter.addWidget(self.item_table)
 
-        self.territory_table = GathererWindow.TerritoryTableWidget(self)
-        self.centre_splitter.addWidget(self.territory_table)
-        # self.territory_table.cellClicked.connect(self.on_territory_table_cell_clicked)
+        # self.territory_table = GathererWindow.TerritoryTableWidget_(self)
+        self.territory_table_model = GathererWindow.TerritoryTableModel(self)
+        self.territory_table_view = GathererWindow.TerritoryTableView(self)
+        self.territory_table_view.setModel(self.territory_table_model)
+        self.territory_table_proxy_model = QSortFilterProxyModel(self)
+        self.centre_splitter.addWidget(self.territory_table_view)
+        self.territory_table_view.clicked.connect(
+            self.territory_table_model.on_cell_clicked
+        )
 
         self.map = GathererWindow.Map()
         self.centre_splitter.addWidget(self.map)
+
+        self.setMinimumSize(QSize(1000, 600))
 
         # Workers
         self.classjob_config_dict = PersistMapping[int, ClassJobConfig](
@@ -588,9 +660,11 @@ class GathererWindow(QMainWindow):
             self.item_table.on_item_table_update
         )
         self.gatherer_worker.territory_table_update_signal.connect(
-            self.territory_table.on_item_table_update
+            self.territory_table_model.on_item_table_update
         )
-        self.territory_table.update_map_signal.connect(self.gatherer_worker.update_map)
+        self.territory_table_model.update_map_signal.connect(
+            self.gatherer_worker.update_map
+        )
         self.set_auto_refresh_signal.connect(self.gatherer_worker.set_auto_refresh)
         self.gatherer_worker.set_map_image_signal.connect(self.map.set_map_image)
         self.gatherer_worker.draw_gathering_point_signal.connect(

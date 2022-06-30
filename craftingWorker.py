@@ -51,6 +51,7 @@ class CraftingWorker(QThread):
         self.auto_refresh_listings = True
         self._item_crafting_value_table: Dict[int, float] = {}
         self._item_crafting_value_table_mutex = QMutex()
+        self._recipe_sent_to_table: List[int] = []
         super().__init__(parent)
 
     def get_item_crafting_value_table(self) -> Dict[int, float]:
@@ -117,18 +118,20 @@ class CraftingWorker(QThread):
 
         def _is_recipe_expired(recipe: Recipe, time_s: float) -> bool:
             if is_listing_expired(recipe.ItemResult.ID, self.world_id, time_s):
+                print(f"Recipe Result {recipe.ItemResult.Name} is expired")
                 return True
             for ingredient_index in range(9):
                 item: Item = getattr(recipe, f"ItemIngredient{ingredient_index}")
-                if item and is_listing_expired(item.ID, self.world_id, time_s):
-                    return True
-                item_recipe_list: Optional[Tuple[Recipe, ...]] = getattr(
-                    recipe, f"ItemIngredientRecipe{ingredient_index}"
-                )
-                if item_recipe_list:
-                    for item_recipe in item_recipe_list:
-                        if _is_recipe_expired(item_recipe, time_s):
-                            return True
+                if item:
+                    if is_listing_expired(item.ID, self.world_id, time_s):
+                        return True
+                    item_recipe_list: Optional[Tuple[Recipe, ...]] = getattr(
+                        recipe, f"ItemIngredientRecipe{ingredient_index}"
+                    )
+                    if item_recipe_list:
+                        for item_recipe in item_recipe_list:
+                            if _is_recipe_expired(item_recipe, time_s):
+                                return True
             return False
 
         return _is_recipe_expired(recipe, time_s)
@@ -145,8 +148,11 @@ class CraftingWorker(QThread):
             QCoreApplication.processEvents()
             if self.isInterruptionRequested():
                 return
-            if self.is_recipe_expired(recipe):
-                print(f"Recipe {recipe.ItemResult.Name} is expired")
+            if (
+                recipe.ItemResult.ID not in self._recipe_sent_to_table
+                or self.is_recipe_expired(recipe)
+            ):
+                self._recipe_sent_to_table.append(recipe.ItemResult.ID)
                 self.update_table_recipe(recipe)
             # log_time(
             #     f"Refreshing marketboard data {recipe_index+1}/{len(recipe_list)} ({recipe.ItemResult.Name})",
@@ -209,10 +215,10 @@ class CraftingWorker(QThread):
                     self.print_status(
                         f"Getting recipes for {classjob.Abbreviation} level {classjob_level}..."
                     )
-                    print(
-                        f"Getting recipes for {classjob.Abbreviation} level {classjob_level}..."
-                    )
-                    t = time.time()
+                    # print(
+                    #     f"Getting recipes for {classjob.Abbreviation} level {classjob_level}..."
+                    # )
+                    # t = time.time()
                     for recipe in yield_recipes(classjob.ID, classjob_level):
                         # print("polling for interrupt")
                         QCoreApplication.processEvents()
@@ -224,11 +230,11 @@ class CraftingWorker(QThread):
                         #     f"{classjob.Abbreviation} lvl {classjob_level}: Refreshing {recipe.ItemResult.Name}..."
                         # )
                     self.classjob_level_current_dict[classjob.ID] -= 1
-                    t = log_time("Getting recipes", t)
-                t = time.time()
+                    # t = log_time("Getting recipes", t)
+                # t = time.time()
                 if self.auto_refresh_listings:
                     self.refresh_listings()
-                t = log_time("Refreshing listings", t)
+                # t = log_time("Refreshing listings", t)
             if not any(
                 current_level > 0
                 for current_level in self.classjob_level_current_dict.values()
