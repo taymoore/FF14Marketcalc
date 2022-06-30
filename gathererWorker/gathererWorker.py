@@ -11,6 +11,7 @@ import pandas as pd
 import numpy as np
 import pyperclip
 from PySide6.QtCore import (
+    QRegularExpression,
     QSortFilterProxyModel,
     Slot,
     Signal,
@@ -461,13 +462,15 @@ class GathererWindow(QMainWindow):
             self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
             self.verticalHeader().hide()
             self.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            # self.setSortingEnabled(True)
 
     class TerritoryTableModel(QAbstractTableModel):
         update_map_signal = Signal(int)
 
         def __init__(self, parent: Optional[QObject] = None) -> None:
             super().__init__(parent)
-            self.table_data: List[List[Union[QTableWidgetItem, int]]] = []
+            self.table_data: List[List[QTableWidgetItem]] = []
+            self.territory_id_list: List[int] = []
             self.header_data: List[str] = ["Name"]
 
         def rowCount(
@@ -516,42 +519,21 @@ class GathererWindow(QMainWindow):
             self,
             territory_type: TerritoryType,
         ) -> None:
-            for _row in self.table_data:
-                if _row[-1] == territory_type.ID:
-                    return
+            if territory_type.ID in self.territory_id_list:
+                return
             self.beginInsertRows(QModelIndex(), self.rowCount(), self.rowCount())
             # row: List[Union[QTableWidgetItem, int]] = []
             row = []
             row.append(territory_type.PlaceName.Name)
-            row.append(territory_type.ID)
             self.table_data.append(row)
+            self.territory_id_list.append(territory_type.ID)
             self.endInsertRows()
             # self.sortItems(0, Qt.DescendingOrder)
 
         @Slot(int, int)
         def on_cell_clicked(self, item: QModelIndex) -> None:
             print(f"Clicked on {item.row()} {item.column()}, {item.data()}")
-            self.update_map_signal.emit(self.table_data[item.row()][-1])
-
-    class TerritoryTableWidget_(QTableWidget):
-        update_map_signal = Signal(int)
-
-        def __init__(self, parent: QWidget):
-            super().__init__(parent)
-            self.setColumnCount(1)
-            self.setHorizontalHeaderLabels(["Name"])
-            self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-            self.verticalHeader().hide()
-            self.setEditTriggers(QAbstractItemView.NoEditTriggers)
-
-            self.table_data: Dict[int, List[QTableWidgetItem]] = {}
-
-            self.cellClicked.connect(self.on_cell_clicked)  # type: ignore
-
-        def clear_contents(self) -> None:
-            self.clearContents()
-            self.setRowCount(0)
-            self.table_data.clear()
+            self.update_map_signal.emit(self.territory_id_list[item.row()])
 
     class Map(QWidget):
         def __init__(self):
@@ -625,12 +607,18 @@ class GathererWindow(QMainWindow):
         self.centre_splitter.addWidget(self.item_table)
 
         # self.territory_table = GathererWindow.TerritoryTableWidget_(self)
+        # TODO: Review delegate for sorting unique https://stackoverflow.com/questions/53324931/qsortfilterproxymodel-by-column-value
         self.territory_table_model = GathererWindow.TerritoryTableModel(self)
         self.territory_table_view = GathererWindow.TerritoryTableView(self)
-        self.territory_table_view.setModel(self.territory_table_model)
         self.territory_table_proxy_model = QSortFilterProxyModel(self)
+        self.territory_table_proxy_model.sort(0, Qt.AscendingOrder)
+        self.territory_search_lineedit.textChanged.connect(
+            self.on_line_edit_text_changed
+        )
+        self.territory_table_proxy_model.setSourceModel(self.territory_table_model)
+        self.territory_table_view.setModel(self.territory_table_proxy_model)
         self.centre_splitter.addWidget(self.territory_table_view)
-        self.territory_table_view.clicked.connect(
+        self.territory_table_view.clicked.connect(  # type: ignore
             self.territory_table_model.on_cell_clicked
         )
 
@@ -677,9 +665,14 @@ class GathererWindow(QMainWindow):
     def on_refresh_button_clicked(self):
         self.set_auto_refresh_signal.emit(True)
 
-    # @Slot(int, int)
-    # def on_territory_table_cell_clicked(self, row: int, column: int) -> None:
-    #     pass
+    @Slot()
+    def on_line_edit_text_changed(self):
+        self.territory_table_proxy_model.setFilterRegularExpression(
+            QRegularExpression(
+                self.territory_search_lineedit.text(),
+                QRegularExpression.CaseInsensitiveOption,
+            )
+        )
 
     def closeEvent(self, event) -> None:
         print("exiting Gatherer...")
