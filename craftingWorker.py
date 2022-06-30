@@ -1,4 +1,5 @@
-import re
+import logging
+import time
 from typing import Dict, List, Optional, Tuple
 from copy import copy
 from PySide6.QtCore import (
@@ -12,9 +13,10 @@ from PySide6.QtCore import (
     QCoreApplication,
 )
 from classjobConfig import ClassJobConfig
-from ff14marketcalc import get_profit
+from ff14marketcalc import get_profit, log_time
 from universalis.universalis import (
     get_listings,
+    is_listing_expired,
     seller_id_in_recipe,
 )
 
@@ -41,6 +43,7 @@ class CraftingWorker(QThread):
         classjob_config_dict: Dict[int, ClassJobConfig],
         parent: Optional[QObject] = None,
     ) -> None:
+        # _logger = logging.getLogger(__name__)
         self.world_id = world_id
         self.classjob_config_dict = classjob_config_dict
         self.classjob_level_current_dict: Dict[int, int] = {}
@@ -109,20 +112,46 @@ class CraftingWorker(QThread):
         if refresh:
             self.refresh_listings()
 
+    def is_recipe_expired(self, recipe: Recipe) -> bool:
+        time_s = time.time()
+
+        def _is_recipe_expired(recipe: Recipe, time_s: float) -> bool:
+            if is_listing_expired(recipe.ItemResult.ID, self.world_id, time_s):
+                return True
+            for ingredient_index in range(9):
+                item: Item = getattr(recipe, f"ItemIngredient{ingredient_index}")
+                if item and is_listing_expired(item.ID, self.world_id, time_s):
+                    return True
+                item_recipe_list: Optional[Tuple[Recipe, ...]] = getattr(
+                    recipe, f"ItemIngredientRecipe{ingredient_index}"
+                )
+                if item_recipe_list:
+                    for item_recipe in item_recipe_list:
+                        if _is_recipe_expired(item_recipe, time_s):
+                            return True
+            return False
+
+        return _is_recipe_expired(recipe, time_s)
+
     # Refresh the listings for the current recipe list
     @Slot(list)
     def refresh_listings(self, recipe_list: List[Recipe] = None) -> None:
         recipe_list = recipe_list if recipe_list else self.recipe_list
-        # print(f"Refreshing listings for {len(recipe_list)} recipes")
+        print(f"Refreshing listings for {len(recipe_list)} recipes")
         for recipe_index, recipe in enumerate(recipe_list):
-            self.print_status(
-                f"Refreshing marketboard data {recipe_index+1}/{len(recipe_list)} ({recipe.ItemResult.Name})..."
-            )
+            # self.print_status(
+            #     f"Refreshing marketboard data {recipe_index+1}/{len(recipe_list)} ({recipe.ItemResult.Name})..."
+            # )
             QCoreApplication.processEvents()
             if self.isInterruptionRequested():
                 return
-            # TODO: If the recipe is in the database, we don't need to refresh it
-            self.update_table_recipe(recipe)
+            if self.is_recipe_expired(recipe):
+                print(f"Recipe {recipe.ItemResult.Name} is expired")
+                self.update_table_recipe(recipe)
+            # log_time(
+            #     f"Refreshing marketboard data {recipe_index+1}/{len(recipe_list)} ({recipe.ItemResult.Name})",
+            #     t,
+            # )
 
     def update_item_crafting_values(self, recipe_collection: RecipeCollection) -> None:
         def update_crafting_value_table(
@@ -169,6 +198,9 @@ class CraftingWorker(QThread):
         print("Starting crafting worker")
         while not self.isInterruptionRequested():
             for classjob in self.classjob_config_dict.values():
+                QCoreApplication.processEvents()
+                if self.isInterruptionRequested():
+                    return
                 if (
                     classjob_level := self.classjob_level_current_dict.setdefault(
                         classjob.ID, classjob.level
@@ -177,17 +209,26 @@ class CraftingWorker(QThread):
                     self.print_status(
                         f"Getting recipes for {classjob.Abbreviation} level {classjob_level}..."
                     )
+                    print(
+                        f"Getting recipes for {classjob.Abbreviation} level {classjob_level}..."
+                    )
+                    t = time.time()
                     for recipe in yield_recipes(classjob.ID, classjob_level):
+                        # print("polling for interrupt")
                         QCoreApplication.processEvents()
                         if self.isInterruptionRequested():
                             return
+                        # print("interrupts processed")
                         self.recipe_list.append(recipe)
-                        self.print_status(
-                            f"{classjob.Abbreviation} lvl {classjob_level}: Refreshing {recipe.ItemResult.Name}..."
-                        )
+                        # self.print_status(
+                        #     f"{classjob.Abbreviation} lvl {classjob_level}: Refreshing {recipe.ItemResult.Name}..."
+                        # )
                     self.classjob_level_current_dict[classjob.ID] -= 1
+                    t = log_time("Getting recipes", t)
+                t = time.time()
                 if self.auto_refresh_listings:
                     self.refresh_listings()
+                t = log_time("Refreshing listings", t)
             if not any(
                 current_level > 0
                 for current_level in self.classjob_level_current_dict.values()

@@ -476,16 +476,6 @@ class MainWindow(QMainWindow):
         self.crafting_worker = CraftingWorker(
             world_id=world_id,
             classjob_config_dict=self.classjob_config,
-            # classjob_level_max_dict={
-            #     8: 71,
-            #     9: 72,
-            #     10: 69,
-            #     11: 79,
-            #     12: 71,
-            #     13: 74,
-            #     14: 71,
-            #     15: 69,
-            # },
         )
         self.crafting_worker.status_bar_update_signal.connect(
             self.status_bar_label.setText
@@ -574,6 +564,7 @@ class MainWindow(QMainWindow):
             if row_widget_list[0].row() == row:
                 break
         item_name = row_widget_list[1].text()
+        print(f"item name: {item_name}")
         self.status_bar_label.setText(f"Processing {item_name}...")
         self.recipe_textedit.setText(
             print_recipe(get_recipe_by_id(recipe_id), world_id)

@@ -196,7 +196,7 @@ class GatheringPointBase(BaseModel):
 class ExportedGatheringPoint(BaseModel):
     GatheringTypeTargetID: int
     ID: int
-    Patch: int
+    Patch: Optional[int]
     Radius: int
     Url: str
     X: float
@@ -220,7 +220,7 @@ class TerritoryType(BaseModel):
 
 
 class GatheringPoint(BaseModel):
-    ExportedGatheringPoint: ExportedGatheringPoint
+    ExportedGatheringPoint: Union[ExportedGatheringPoint, bool]
     GameContentLinks: GameContentLinks
     ID: int
     PlaceNameTargetID: int

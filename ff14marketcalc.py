@@ -1,5 +1,7 @@
+from datetime import timedelta
 import enum
 import logging
+import time
 from typing import Callable, Any, Dict, Iterable, Mapping, Optional, Tuple, List, Union
 
 from pydantic import BaseModel
@@ -231,6 +233,21 @@ def print_recipe(recipe: Recipe, world: Union[str, int]) -> str:
             for action in actions:
                 string += f"  {action.aquire_action.name} {action.item.Name} {action.quantity} x {action.cost}\n"
     return string
+
+
+def log_time(
+    msg: str,
+    old_time: Optional[float],
+    logger: logging.Logger = None,
+    level: int = logging.INFO,
+) -> float:
+    new_time = time.time()
+    if old_time is not None:
+        if logger:
+            logger.log(level, f"{msg} took {timedelta(seconds=new_time - old_time)}")
+        else:
+            print(f"{msg} took {timedelta(seconds=new_time - old_time)}")
+    return new_time
 
 
 if __name__ == "__main__":

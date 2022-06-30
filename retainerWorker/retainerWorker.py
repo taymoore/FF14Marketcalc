@@ -26,8 +26,9 @@ from universalis.models import Listing, Listings
 from xivapi.xivapi import get_classjob_doh_list, get_item, get_recipes
 
 _logger = logging.getLogger(__name__)
+_logger.setLevel(logging.DEBUG)
 
-ROW_REFRESH_PERIOD_MS = 60000  # 1 min
+ROW_REFRESH_PERIOD_MS = 60000 * 5  # 5 min
 
 
 class RetainerWorker(QObject):
@@ -48,7 +49,7 @@ class RetainerWorker(QObject):
                 with self.file_path.open("rb") as f:
                     listings_list = pickle.load(f)
                     for listings in listings_list:
-                        retainer_listings_changed_signal.emit(listings)
+                        retainer_listings_changed_signal.emit(listings)  # type: ignore
                         # self.on_retainer_listings_changed(listings)
         except Exception as e:
             _logger.exception(e)
@@ -86,6 +87,7 @@ class RetainerWorker(QObject):
                 else:
                     self.listing_data_updated.emit(listing_data)
             else:
+                print(f"Removing {listing_data.item.Name} from retainer worker")
                 listing_data.timer.stop()
                 del self.table_data[event.timerId()]
         else:
@@ -93,6 +95,7 @@ class RetainerWorker(QObject):
 
     @Slot(Listings)
     def on_retainer_listings_changed(self, listings: Listings) -> None:
+        print("on retainer listings changed")
         if not any(
             row_data.listings.itemID == listings.itemID
             for row_data in self.table_data.values()

@@ -87,10 +87,12 @@ from xivapi.xivapi import (
     get_content,
 )
 
+_logger = logging.getLogger(__name__)
+
 
 class GathererWorker(QThread):
     class GatheringItems(BaseModel):
-        results_max: Optional[int]
+        results_max: int = 0
         results_pulled: int = 0
         gathering_items: Dict[int, GatheringItem]
 
@@ -103,7 +105,7 @@ class GathererWorker(QThread):
     def __init__(
         self,
         world_id: int,
-        classjob_config_dict: Dict[int, ClassJobConfig],
+        classjob_config_dict: PersistMapping[int, ClassJobConfig],
         parent: Optional[QObject] = None,
     ) -> None:
         self.world_id = world_id
@@ -141,7 +143,7 @@ class GathererWorker(QThread):
         self.user_selected_territory_id = None
         self.auto_refresh_enabled = auto_refresh_enabled
         if self.auto_refresh_enabled:
-            for gathering_item in self.gathering_items_dict.values():
+            for gathering_item in self.gathering_items_dict.gathering_items.values():
                 QCoreApplication.processEvents()
                 if self.isInterruptionRequested():
                     return
@@ -152,11 +154,15 @@ class GathererWorker(QThread):
                 self.update_table_territory(gathering_item)
 
     def add_gathering_point_to_map(self, gathering_point: GatheringPoint) -> None:
-        self.draw_gathering_point_signal.emit(
-            gathering_point.ExportedGatheringPoint.X,
-            gathering_point.ExportedGatheringPoint.Y,
-            gathering_point.ExportedGatheringPoint.Radius,
-        )
+        if (
+            gathering_point.ExportedGatheringPoint
+            and gathering_point.ExportedGatheringPoint.Radius > 0
+        ):
+            self.draw_gathering_point_signal.emit(
+                gathering_point.ExportedGatheringPoint.X,
+                gathering_point.ExportedGatheringPoint.Y,
+                gathering_point.ExportedGatheringPoint.Radius,
+            )
 
     @Slot(int)
     def update_map(self, territory_id: int) -> None:
@@ -187,8 +193,14 @@ class GathererWorker(QThread):
         self.status_bar_update_signal.emit(text)
 
     def yield_gathering_item(self) -> GatheringItem:
-        for gathering_item in self.gathering_items_dict.gathering_items.values():
-            yield gathering_item
+        for _gathering_item in self.gathering_items_dict.gathering_items.values():
+            # if _gathering_item.GameContentLinks.GatheringPointBase is None:
+            #     del self.gathering_items_dict.gathering_items[_gathering_item.ID]
+            #     continue
+            yield _gathering_item
+        # TODO: if self.gathering_items_dict.results_max == self.gathering_items_dict.results_pulled:
+        # Consider defaults to 0
+        # return
         page = get_page(
             "GatheringItem", self.gathering_items_dict.results_pulled // 100 + 1
         )
@@ -212,6 +224,12 @@ class GathererWorker(QThread):
             )
             self.gathering_items_dict.results_pulled += 1
             if gathering_item.Item is None:
+                continue
+            if gathering_item.GameContentLinks.GatheringPointBase is None:
+                print(
+                    f"ERROR: Item {gathering_item.Item.Name} has no GatheringPointBase"
+                )
+                print(f"Gathering Item ID: {gathering_item.ID}")
                 continue
             self.gathering_items_dict.gathering_items[
                 gathering_item.ID
@@ -276,6 +294,11 @@ class GathererWorker(QThread):
             gathering_point_base = self.get_gathering_point_base(
                 gathering_point_base_id
             )
+            if gathering_point_base.GameContentLinks.GatheringPoint is None:
+                print(
+                    f"Gathering Point Base ID {gathering_point_base.ID} has no GatheringPoint"
+                )
+                continue
             for (
                 gathering_point_id
             ) in (
@@ -285,7 +308,7 @@ class GathererWorker(QThread):
                 if self.isInterruptionRequested():
                     return
                 gathering_point = self.get_gathering_point(gathering_point_id)
-                if gathering_point.TerritoryTypeTargetID == 1:
+                if gathering_point.TerritoryTypeTargetID <= 1:
                     continue
                 # QCoreApplication.processEvents()
                 # if self.isInterruptionRequested():
@@ -315,12 +338,12 @@ class GathererWorker(QThread):
                 QCoreApplication.processEvents()
                 if self.isInterruptionRequested():
                     return
-                print("Updating table item")
+                # print("Updating table item")
                 self.update_table_item(gathering_item)
                 QCoreApplication.processEvents()
                 if self.isInterruptionRequested():
                     return
-                print("Updating table territory")
+                # print("Updating table territory")
                 self.update_table_territory(gathering_item)
 
     def stop(self):
@@ -360,13 +383,14 @@ class GathererWindow(QMainWindow):
             profit: float,
             velocity: float,
         ) -> None:
+            row: List[QTableWidgetItem]
             if gathering_item.ID in self.table_data:
                 row = self.table_data[gathering_item.ID]
                 row[3].setText(f"{profit:,.0f}")
                 row[4].setText(f"{velocity:.2f}")
                 row[5].setText(f"{profit * velocity:,.0f}")
             else:
-                row: List[QTableWidgetItem] = []
+                row = []
                 bot_lvl = None
                 min_lvl = None
                 try:
@@ -440,7 +464,7 @@ class GathererWindow(QMainWindow):
 
             self.table_data: Dict[int, List[QTableWidgetItem]] = {}
 
-            self.cellClicked.connect(self.on_cell_clicked)
+            self.cellClicked.connect(self.on_cell_clicked)  # type: ignore
 
         def clear_contents(self) -> None:
             self.clearContents()
@@ -514,6 +538,7 @@ class GathererWindow(QMainWindow):
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
+        # self.setWindowFlags(Qt.WindowStaysOnBottomHint)
         self.main_widget = QWidget()
         self.setCentralWidget(self.main_widget)
         self.main_layout = QVBoxLayout()
@@ -524,7 +549,7 @@ class GathererWindow(QMainWindow):
 
         self.refresh_button = QPushButton()
         self.refresh_button.setText("Refresh")
-        self.refresh_button.clicked.connect(self.on_refresh_button_clicked)
+        self.refresh_button.clicked.connect(self.on_refresh_button_clicked)  # type: ignore
 
         self.centre_splitter = QSplitter()
         self.main_layout.addWidget(self.centre_splitter)
@@ -584,7 +609,7 @@ class GathererWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         print("exiting Gatherer...")
-        self.classjob_config_dict.save_to_disk()
         self.gatherer_worker.stop()
         self.gatherer_worker.wait()
+        self.classjob_config_dict.save_to_disk()
         super().closeEvent(event)

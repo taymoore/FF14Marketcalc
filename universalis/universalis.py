@@ -19,7 +19,7 @@ get_content_time = time.time() - GET_CONTENT_RATE
 
 universalis_mutex = QMutex()
 
-CACHE_TIMEOUT_S = 3600 * 2
+CACHE_TIMEOUT_S = 3600 * 4
 CACHE_FILENAME = "listings.json"
 
 cache: Dict[Any, Tuple[Listings, float]]
@@ -122,6 +122,19 @@ def seller_id_in_recipe(recipe: Recipe, world_id: int) -> List[Listings]:
     return listings_list
 
 
+def is_listing_expired(
+    id: int,
+    world: Union[int, str],
+    time_s: float,
+    cache_timeout_s: Optional[float] = None,
+) -> bool:
+    _args = [id, world]
+    _cache_timeout_s = (
+        cache_timeout_s if cache_timeout_s is not None else CACHE_TIMEOUT_S
+    )
+    return str(_args) not in cache or time_s - cache[str(_args)][1] > _cache_timeout_s
+
+
 def get_listings(
     id: int,
     world: Union[int, str],
@@ -141,6 +154,8 @@ def get_listings(
     if str(_args) not in cache or time.time() - cache[str(_args)][1] > _cache_timeout_s:
         listings = _get_listings(id, world)
 
+        # TODO: Rename history to purchase_history
+
         # Merge history and listing_history
         if str(_args) in cache:
             listings.history = cache[str(_args)][0].history
@@ -148,12 +163,26 @@ def get_listings(
         else:
             listings.history = pd.DataFrame(columns=["Price"])
             listings.listing_history = pd.DataFrame(columns=["Price"])
-        for recent_history_listing in listings.recentHistory:
-            listings.history.loc[
-                recent_history_listing.timestamp
-            ] = recent_history_listing.pricePerUnit
-        for listing in listings.listings:
-            listings.listing_history.loc[listing.lastReviewTime] = listing.pricePerUnit
+        try:
+            for recent_history_listing in listings.recentHistory:
+                listings.history.loc[
+                    recent_history_listing.timestamp
+                ] = recent_history_listing.pricePerUnit
+        except Exception as e:
+            print(f"Error adding purchase history to listings: {e}")
+            print(f"Tried to add {recent_history_listing}")
+            print(f"listings history: {listings.history}")
+            raise e
+        try:
+            for listing in listings.listings:
+                listings.listing_history.loc[
+                    listing.lastReviewTime
+                ] = listing.pricePerUnit
+        except Exception as e:
+            print(f"Error adding current listings: {e}")
+            print(f"Tried to add {listing}")
+            print(f"to listings: {listings.listing_history}")
+            raise e
 
         # Velocity calculation
         if (

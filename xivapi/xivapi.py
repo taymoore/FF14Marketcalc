@@ -160,12 +160,13 @@ recipe_classjob_level_list = PersistMapping[int, Dict[int, List[str]]](
 def yield_recipes(
     classjob_id: int, classjob_level: int
 ) -> Generator[Recipe, None, None]:
+    print(f"yield_recipes: {classjob_id} {classjob_level}")
     recipe_classjob_level_list_mutex.lock()
+    url_list: List[str]
     if (
         classjob_id in recipe_classjob_level_list
         and classjob_level in recipe_classjob_level_list[classjob_id]
     ):
-        print(f"Using cached recipes for {classjob_id} {classjob_level}")
         url_list = recipe_classjob_level_list[classjob_id][classjob_level]
         print(f"{len(url_list)} recipes")
         recipe_classjob_level_list_mutex.unlock()
@@ -174,7 +175,7 @@ def yield_recipes(
     else:
         print(f"No cached recipes for {classjob_id} {classjob_level}")
         recipe_classjob_level_list_mutex.unlock()
-        url_list: List[str] = []
+        url_list = []
         for page_result_list in get_content_page_results(
             f"search?filters=RecipeLevelTable.ClassJobLevel={classjob_level},ClassJob.ID={classjob_id}"
         ):
