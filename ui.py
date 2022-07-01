@@ -150,13 +150,15 @@ class MainWindow(QMainWindow):
             self.table_data.clear()
 
         def get_min_price(self, listings: Listings) -> float:
-            return min(
-                [
-                    listing.pricePerUnit
-                    for listing in listings.listings
-                    if listing.sellerID != self.seller_id
-                ]
-            )
+            listing_prices = [
+                listing.pricePerUnit
+                for listing in listings.listings
+                if listing.sellerID != self.seller_id
+            ]
+            if len(listing_prices) > 0:
+                return min(listing_prices)
+            else:
+                return np.inf
 
         @Slot(list)
         def on_listing_data_updated(self, listing_data: ListingData) -> None:

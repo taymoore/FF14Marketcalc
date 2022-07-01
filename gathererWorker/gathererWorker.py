@@ -141,8 +141,11 @@ class GathererWorker(QThread):
         # self.territory_to_gathering_item_dict: Dict[int, Set[int]] = {}
         self.territory_to_gathering_point_dict: Dict[int, Set[int]] = {}
         self.gathering_item_to_territory_dict: Dict[int, Set[int]] = {}
+        self.gathering_item_to_gathering_point_dict: Dict[int, Set[int]] = {}
         # self.territory_to_gathering_items_dict: Dict[int, Set[int]] = {}
         self.map_cache_dict: Dict[int, QPixmap] = {}
+        self.selected_territory_id: Optional[int] = None
+        self.gathering_item_filter_set: Set[int] = set()
         super().__init__(parent)
 
     @Slot(bool)
@@ -161,19 +164,23 @@ class GathererWorker(QThread):
         #             return
         #         self.update_table_territory(gathering_item)
 
-    def add_gathering_point_to_map(self, gathering_point: GatheringPoint) -> None:
-        if (
-            gathering_point.ExportedGatheringPoint
-            and gathering_point.ExportedGatheringPoint.Radius > 0
-        ):
-            self.draw_gathering_point_signal.emit(
-                gathering_point.ExportedGatheringPoint.X,
-                gathering_point.ExportedGatheringPoint.Y,
-                gathering_point.ExportedGatheringPoint.Radius,
-            )
+    @Slot(int)
+    def gathering_item_filter_added(self, gathering_item_id: int) -> None:
+        if gathering_item_id not in self.gathering_item_filter_set:
+            self.gathering_item_filter_set.add(gathering_item_id)
+            if self.selected_territory_id:
+                self.update_map(self.selected_territory_id)
+
+    @Slot(int)
+    def gathering_item_filter_removed(self, gathering_item_id: int) -> None:
+        if gathering_item_id in self.gathering_item_filter_set:
+            self.gathering_item_filter_set.remove(gathering_item_id)
+            if self.selected_territory_id:
+                self.update_map(self.selected_territory_id)
 
     @Slot(int)
     def update_map(self, territory_id: int) -> None:
+        self.selected_territory_id = territory_id
         if territory_id in self.map_cache_dict:
             self.set_map_image_signal.emit(self.map_cache_dict[territory_id])
         else:
@@ -193,9 +200,38 @@ class GathererWorker(QThread):
             self.map_cache_dict[territory_id] = pixmap
             self.set_map_image_signal.emit(pixmap)
         for gathering_point_id in self.territory_to_gathering_point_dict[territory_id]:
-            self.add_gathering_point_to_map(
-                self.get_gathering_point(gathering_point_id)
-            )
+            gathering_point = self.get_gathering_point(gathering_point_id)
+            if (
+                gathering_point.ExportedGatheringPoint
+                and gathering_point.ExportedGatheringPoint.Radius > 0
+                and (
+                    len(self.gathering_item_filter_set) == 0
+                    or any(
+                        gathering_point_id
+                        in self.gathering_item_to_gathering_point_dict[
+                            gathering_item_id
+                        ]
+                        for gathering_item_id in self.gathering_item_filter_set
+                    )
+                )
+            ):
+                if any(
+                    gathering_point_id
+                    in self.gathering_item_to_gathering_point_dict[gathering_item_id]
+                    for gathering_item_id in self.gathering_item_filter_set
+                ):
+                    print(f"{gathering_point_id} is in filter")
+                elif len(self.gathering_item_filter_set) > 0:
+                    print(f"gathering_point_id {gathering_point_id} is not in filter")
+                    print(f"gathering_item_filter_set {self.gathering_item_filter_set}")
+                    print(
+                        f"gathering_item_to_gathering_point_dict {self.gathering_item_to_gathering_point_dict}"
+                    )
+                self.draw_gathering_point_signal.emit(
+                    gathering_point.ExportedGatheringPoint.X,
+                    gathering_point.ExportedGatheringPoint.Y,
+                    gathering_point.ExportedGatheringPoint.Radius,
+                )
 
     def print_status(self, text: str):
         self.status_bar_update_signal.emit(text)
@@ -290,6 +326,7 @@ class GathererWorker(QThread):
         )
 
     def update_table_territory(self, gathering_item: GatheringItem) -> None:
+        update_map = False
         territory_type_set = set()
         for (
             gathering_point_base_id
@@ -340,6 +377,16 @@ class GathererWorker(QThread):
                     self.gathering_item_to_territory_changed_signal.emit(
                         self.gathering_item_to_territory_dict
                     )
+                if (
+                    gathering_point_id
+                    not in self.gathering_item_to_gathering_point_dict.setdefault(
+                        gathering_item.ID, set()
+                    )
+                ):
+                    self.gathering_item_to_gathering_point_dict[gathering_item.ID].add(
+                        gathering_point_id
+                    )
+                    update_map = True
                 # self.territory_to_gathering_item_dict.setdefault(
                 #     territory_type.ID, set()
                 # ).add(gathering_item.ID)
@@ -350,6 +397,8 @@ class GathererWorker(QThread):
             self.territory_table_update_signal.emit(
                 self.get_territory_type(territory_type_id)
             )
+        if update_map and self.selected_territory_id:
+            self.update_map(self.selected_territory_id)
 
     def run(self):
         print("Starting gatherer worker")
@@ -390,7 +439,7 @@ class GathererWindow(QMainWindow):
             self.setEditTriggers(QAbstractItemView.NoEditTriggers)
             self.setSelectionMode(QAbstractItemView.MultiSelection)
             self.setSelectionBehavior(QAbstractItemView.SelectRows)
-            self.cellClicked.connect(self.on_cell_clicked)
+            self.cellClicked.connect(self.on_cell_clicked)  # type: ignore
 
             self.table_data: Dict[
                 int, List[QTableWidgetItem]
@@ -521,8 +570,7 @@ class GathererWindow(QMainWindow):
             assert isinstance(source_model, GathererWindow.TerritoryTableModel)
             if (
                 len(self.gathering_item_filter_set) == 0
-                or source_model.territory_id_list[source_row]
-                in self.territory_filter_set
+                or source_model.table_data[source_row][-1] in self.territory_filter_set
             ):
                 return super().filterAcceptsRow(source_row, source_parent)
             return False
@@ -557,12 +605,9 @@ class GathererWindow(QMainWindow):
                 self.invalidateRowsFilter()
 
     class TerritoryTableModel(QAbstractTableModel):
-        update_map_signal = Signal(int)
-
         def __init__(self, parent: Optional[QObject] = None) -> None:
             super().__init__(parent)
-            self.table_data: List[List[QTableWidgetItem]] = []
-            self.territory_id_list: List[int] = []
+            self.table_data: List[List[Union[QTableWidgetItem, int]]] = []
             self.header_data: List[str] = ["Name"]
 
         def rowCount(
@@ -611,21 +656,16 @@ class GathererWindow(QMainWindow):
             self,
             territory_type: TerritoryType,
         ) -> None:
-            if territory_type.ID in self.territory_id_list:
+            if any(territory_type.ID == row_data[-1] for row_data in self.table_data):
                 return
             self.beginInsertRows(QModelIndex(), self.rowCount(), self.rowCount())
             # row: List[Union[QTableWidgetItem, int]] = []
-            row = []
-            row.append(territory_type.PlaceName.Name)
-            self.table_data.append(row)
-            self.territory_id_list.append(territory_type.ID)
+            row_data = []
+            row_data.append(territory_type.PlaceName.Name)
+            row_data.append(territory_type.ID)
+            self.table_data.append(row_data)
             self.endInsertRows()
             # self.sortItems(0, Qt.DescendingOrder)
-
-        @Slot(int, int)
-        def on_cell_clicked(self, item: QModelIndex) -> None:
-            print(f"Clicked on {item.row()} {item.column()}, {item.data()}")
-            self.update_map_signal.emit(self.territory_id_list[item.row()])
 
     class Map(QWidget):
         def __init__(self):
@@ -665,6 +705,7 @@ class GathererWindow(QMainWindow):
             super().paintEvent(event)
 
     set_auto_refresh_signal = Signal(bool)
+    update_map_signal = Signal(int)
 
     def __init__(
         self,
@@ -704,7 +745,7 @@ class GathererWindow(QMainWindow):
         self.territory_table_view = GathererWindow.TerritoryTableView(self)
         self.territory_table_proxy_model = GathererWindow.TerritoryTableProxyModel(self)
         self.territory_table_proxy_model.sort(0, Qt.AscendingOrder)
-        self.territory_search_lineedit.textChanged.connect(
+        self.territory_search_lineedit.textChanged.connect(  # type: ignore
             self.territory_table_proxy_model.setFilterRegularExpression
         )
         self.item_table.gathering_item_filter_added_signal.connect(
@@ -717,7 +758,7 @@ class GathererWindow(QMainWindow):
         self.territory_table_view.setModel(self.territory_table_proxy_model)
         self.centre_splitter.addWidget(self.territory_table_view)
         self.territory_table_view.clicked.connect(  # type: ignore
-            self.territory_table_model.on_cell_clicked
+            self.on_territory_table_clicked
         )
 
         self.map = GathererWindow.Map()
@@ -748,9 +789,7 @@ class GathererWindow(QMainWindow):
         self.gatherer_worker.territory_table_update_signal.connect(
             self.territory_table_model.on_item_table_update
         )
-        self.territory_table_model.update_map_signal.connect(
-            self.gatherer_worker.update_map
-        )
+        self.update_map_signal.connect(self.gatherer_worker.update_map)
         self.set_auto_refresh_signal.connect(self.gatherer_worker.set_auto_refresh)
         self.gatherer_worker.set_map_image_signal.connect(self.map.set_map_image)
         self.gatherer_worker.draw_gathering_point_signal.connect(
@@ -759,12 +798,28 @@ class GathererWindow(QMainWindow):
         self.gatherer_worker.gathering_item_to_territory_changed_signal.connect(
             self.territory_table_proxy_model.on_gathering_item_to_territory_dict_changed
         )
+        self.item_table.gathering_item_filter_added_signal.connect(
+            self.gatherer_worker.gathering_item_filter_added
+        )
+        self.item_table.gathering_item_filter_removed_signal.connect(
+            self.gatherer_worker.gathering_item_filter_removed
+        )
 
         self.gatherer_worker.start(QThread.LowPriority)
 
     @Slot()
     def on_refresh_button_clicked(self):
         self.set_auto_refresh_signal.emit(True)
+
+    @Slot(int, int)
+    def on_territory_table_clicked(self, item: QModelIndex) -> None:
+        print(f"Clicked on {item.row()} {item.column()}, {item.data()}")
+        data_item = self.territory_table_proxy_model.mapToSource(item)
+        print(f"Data item: {data_item.row()} {data_item.column()}, {data_item.data()}")
+        self.update_map_signal.emit(
+            self.territory_table_model.table_data[data_item.row()][-1]
+        )
+        # THis is probably wrong?
 
     def closeEvent(self, event) -> None:
         print("exiting Gatherer...")
