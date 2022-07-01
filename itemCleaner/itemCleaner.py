@@ -19,6 +19,8 @@ from xivapi.xivapi import get_item
 
 # axis -> updateAutoSIPrefix can be disabled
 
+from QTableWidgetFloatItem import QTableWidgetFloatItem
+
 
 class InventoryItemDescriptor(BaseModel):
     id: int
@@ -50,14 +52,14 @@ class ItemCleanerForm(QDialog):
             row_widgets: List[QTableWidgetItem] = []
             row_widgets.append(QTableWidgetItem(name))
             # Sort numerically: https://stackoverflow.com/questions/25533140/sorting-qtablewidget-items-numerically
-            row_widgets.append(QTableWidgetItem(f"{crafting_value:.1f}"))
+            row_widgets.append(QTableWidgetFloatItem(f"{crafting_value:.1f}"))
             listings = get_listings(item_id, 55)
             row_widgets.append(
-                QTableWidgetItem(
+                QTableWidgetFloatItem(
                     f"{listings.minPrice - listings.history['Price'].mean():.1f}"
                 )
             )
-            row_widgets.append(QTableWidgetItem(f"{listings.minPrice:.0f}"))
+            row_widgets.append(QTableWidgetFloatItem(f"{listings.minPrice:.0f}"))
             self.insertRow(self.rowCount())
             self.setItem(self.rowCount() - 1, 0, row_widgets[0])
             self.setItem(self.rowCount() - 1, 1, row_widgets[1])

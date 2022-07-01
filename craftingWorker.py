@@ -154,12 +154,13 @@ class CraftingWorker(QThread):
             ):
                 self._recipe_sent_to_table.append(recipe.ItemResult.ID)
                 self.update_table_recipe(recipe)
+                self.update_item_crafting_values(recipe)
             # log_time(
             #     f"Refreshing marketboard data {recipe_index+1}/{len(recipe_list)} ({recipe.ItemResult.Name})",
             #     t,
             # )
 
-    def update_item_crafting_values(self, recipe_collection: RecipeCollection) -> None:
+    def update_item_crafting_values(self, recipe: Recipe) -> None:
         def update_crafting_value_table(
             recipe: Recipe, crafting_value_table: Dict[int, float]
         ):
@@ -171,8 +172,8 @@ class CraftingWorker(QThread):
                 item: Item = getattr(recipe, f"ItemIngredient{ingredient_index}")
                 if not item:
                     break
-                crafting_value_table[item.id] = crafting_value_table.setdefault(
-                    item.id, 0
+                crafting_value_table[item.ID] = crafting_value_table.setdefault(
+                    item.ID, 0
                 ) + (
                     quantity
                     * float(item.LevelItem)
@@ -192,10 +193,7 @@ class CraftingWorker(QThread):
                     update_crafting_value_table(ingredient_recipe, crafting_value_table)
 
         self._item_crafting_value_table_mutex.lock()
-        self._item_crafting_value_table.clear()
-        recipe: Recipe
-        for recipe in recipe_collection:
-            update_crafting_value_table(recipe, self._item_crafting_value_table)
+        update_crafting_value_table(recipe, self._item_crafting_value_table)
         self._item_crafting_value_table_mutex.unlock()
         self.crafting_value_table_changed.emit(self._item_crafting_value_table)
 
@@ -226,6 +224,10 @@ class CraftingWorker(QThread):
                             return
                         # print("interrupts processed")
                         self.recipe_list.append(recipe)
+                        QCoreApplication.processEvents()
+                        if self.isInterruptionRequested():
+                            return
+                        self.update_item_crafting_values(recipe)
                         # self.print_status(
                         #     f"{classjob.Abbreviation} lvl {classjob_level}: Refreshing {recipe.ItemResult.Name}..."
                         # )
