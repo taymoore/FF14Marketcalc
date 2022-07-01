@@ -6,7 +6,7 @@ from operator import mod
 from pathlib import Path
 from pydantic import BaseModel
 from scipy import stats
-from typing import Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 import pandas as pd
 import numpy as np
 import pyperclip
@@ -166,6 +166,7 @@ class GathererWorker(QThread):
 
     @Slot(int)
     def gathering_item_filter_added(self, gathering_item_id: int) -> None:
+        print(f"gathering_item_filter_added: {gathering_item_id}")
         if gathering_item_id not in self.gathering_item_filter_set:
             self.gathering_item_filter_set.add(gathering_item_id)
             if self.selected_territory_id:
@@ -173,6 +174,7 @@ class GathererWorker(QThread):
 
     @Slot(int)
     def gathering_item_filter_removed(self, gathering_item_id: int) -> None:
+        print(f"gathering_item_filter_removed: {gathering_item_id}")
         if gathering_item_id in self.gathering_item_filter_set:
             self.gathering_item_filter_set.remove(gathering_item_id)
             if self.selected_territory_id:
@@ -542,6 +544,197 @@ class GathererWindow(QMainWindow):
             else:
                 self.gathering_item_filter_removed_signal.emit(gathering_item_id)
 
+    # ----------------------
+    class ItemTableView(QTableView):
+        def __init__(self, parent: Optional[QWidget] = None) -> None:
+            super().__init__(parent)
+            self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+            self.verticalHeader().hide()
+            self.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            self.setSelectionMode(QAbstractItemView.MultiSelection)
+            self.setSelectionBehavior(QAbstractItemView.SelectRows)
+            self.setSortingEnabled(True)
+            self.sortByColumn(5, Qt.DescendingOrder)
+
+    class ItemTableProxyModel(QSortFilterProxyModel):
+        def __init__(self, parent: Optional[QWidget] = None) -> None:
+            super().__init__(parent)
+            self.setDynamicSortFilter(True)
+            # self.sort(4, Qt.DescendingOrder)
+
+        def lessThan(self, left, right):
+            leftData = self.sourceModel().data(left, Qt.UserRole)
+            rightData = self.sourceModel().data(right, Qt.UserRole)
+            return leftData < rightData
+
+        # def filterAcceptsRow(
+        #     self,
+        #     source_row: int,
+        #     source_parent: Union[QModelIndex, QPersistentModelIndex],
+        # ) -> bool:
+        #     source_model = self.sourceModel()
+        #     assert isinstance(source_model, GathererWindow.TerritoryTableModel)
+        #     if (
+        #         len(self.gathering_item_filter_set) == 0
+        #         or source_model.table_data[source_row][-1] in self.territory_filter_set
+        #     ):
+        #         return super().filterAcceptsRow(source_row, source_parent)
+        #     return False
+
+        # def invalidateRowsFilter(self) -> None:
+        #     territory_filter_set: Set[int] = set()
+        #     for gathering_item_id in self.gathering_item_filter_set:
+        #         territory_filter_set.update(
+        #             self.gathering_item_to_territory_dict[gathering_item_id]
+        #         )
+        #     if territory_filter_set != self.territory_filter_set:
+        #         self.territory_filter_set = territory_filter_set
+        #         return super().invalidateRowsFilter()
+
+        # @Slot(dict)
+        # def on_gathering_item_to_territory_dict_changed(
+        #     self, gathering_item_to_territory_dict: Dict[int, Set[int]]
+        # ) -> None:
+        #     self.gathering_item_to_territory_dict = gathering_item_to_territory_dict
+        #     self.invalidateRowsFilter()
+
+        # @Slot(int)
+        # def gathering_item_filter_added(self, gathering_item_id: int) -> None:
+        #     if gathering_item_id not in self.gathering_item_filter_set:
+        #         self.gathering_item_filter_set.add(gathering_item_id)
+        #         self.invalidateRowsFilter()
+
+        # @Slot(int)
+        # def gathering_item_filter_removed(self, gathering_item_id: int) -> None:
+        #     if gathering_item_id in self.gathering_item_filter_set:
+        #         self.gathering_item_filter_set.remove(gathering_item_id)
+        #         self.invalidateRowsFilter()
+
+    class ItemTableModel(QAbstractTableModel):
+        def __init__(self, parent: Optional[QObject] = None) -> None:
+            super().__init__(parent)
+            self.table_data: List[List[Any]] = []
+            self.gathering_item_row_data: Dict[int, List[Any]] = {}
+            self.header_data: List[str] = [
+                "Bot",
+                "Min",
+                "Item",
+                "Profit",
+                "Velocity",
+                "Score",
+            ]
+
+        def rowCount(
+            self, parent: Union[QModelIndex, QPersistentModelIndex] = None
+        ) -> int:
+            return len(self.table_data)
+
+        def columnCount(
+            self, parent: Union[QModelIndex, QPersistentModelIndex] = None
+        ) -> int:
+            return 6
+
+        def data(  # type: ignore[override]
+            self,
+            index: QModelIndex,
+            role: Qt.ItemDataRole = Qt.DisplayRole,
+        ) -> Any:
+            if not index.isValid():
+                return None
+            if role == Qt.DisplayRole:
+                cell_data = self.table_data[index.row()][index.column()]
+                if index.column() == 3 or index.column() == 5:
+                    return f"{cell_data:,.0f}"
+                elif index.column() == 4:
+                    return f"{cell_data:,.2f}"
+                elif index.column() <= 1:
+                    return cell_data if cell_data else ""
+                else:
+                    return cell_data
+            elif role == Qt.UserRole:
+                return self.table_data[index.row()][index.column()]
+            return None
+
+        def headerData(  # type: ignore[override]
+            self,
+            section: int,
+            orientation: Qt.Orientation,
+            role: Qt.ItemDataRole = Qt.DisplayRole,
+        ) -> Optional[str]:
+            if orientation == Qt.Horizontal and role == Qt.DisplayRole:
+                return self.header_data[section]
+            return None
+
+        @Slot(GatheringItem, list, float, float)
+        def on_item_table_update(
+            self,
+            gathering_item: GatheringItem,
+            gathering_point_base_list: List[GatheringPointBase],
+            profit: float,
+            velocity: float,
+        ) -> None:
+            row: List[Any]
+            if gathering_item.ID in self.gathering_item_row_data:
+                row = self.gathering_item_row_data[gathering_item.ID]
+                row[3].setText(f"{profit:,.0f}")
+                row[4].setText(f"{velocity:.2f}")
+                row[5].setText(f"{profit * velocity:,.0f}")
+            else:
+                row = []
+                bot_lvl = None
+                min_lvl = None
+                try:
+                    for gathering_point_base in gathering_point_base_list:
+                        if (
+                            gathering_point_base.GatheringTypeTargetID == 1
+                            or gathering_point_base.GatheringTypeTargetID == 3
+                        ):
+                            if bot_lvl is None:
+                                for (
+                                    __gathering_item
+                                ) in gathering_point_base.yield_gathering_items():
+                                    if __gathering_item.ID == gathering_item.ID:
+                                        bot_lvl = (
+                                            __gathering_item.GatheringItemLevel.GatheringItemLevel
+                                        )
+                                        break
+                        elif (
+                            gathering_point_base.GatheringTypeTargetID == 0
+                            or gathering_point_base.GatheringTypeTargetID == 2
+                        ):
+                            if min_lvl is None:
+                                for (
+                                    __gathering_item
+                                ) in gathering_point_base.yield_gathering_items():
+                                    if __gathering_item.ID == gathering_item.ID:
+                                        min_lvl = (
+                                            __gathering_item.GatheringItemLevel.GatheringItemLevel
+                                        )
+                                        break
+                        else:
+                            raise Exception(
+                                f"Unknown gathering type target ID {gathering_point_base.GatheringTypeTargetID} for gathering point base {gathering_point_base.ID}"
+                            )
+                    assert bot_lvl is not None or min_lvl is not None
+                except AssertionError as e:
+                    print(f"Error: {e}")
+                    print(f"Gathering item {gathering_item.ID}")
+                    raise e
+
+                # TODO: Use widget items here?
+                row.append(bot_lvl)
+                row.append(min_lvl)
+                row.append(gathering_item.Item.Name)
+                row.append(profit)
+                row.append(velocity)
+                row.append(profit * velocity)
+                row.append(gathering_item.ID)
+                self.beginInsertRows(QModelIndex(), self.rowCount(), self.rowCount())
+                self.table_data.append(row)
+                self.gathering_item_row_data[gathering_item.ID] = row
+                self.endInsertRows()
+
+    # ----------------------
     class TerritoryTableView(QTableView):
         def __init__(self, parent: Optional[QWidget] = None) -> None:
             super().__init__(parent)
@@ -646,6 +839,7 @@ class GathererWindow(QMainWindow):
                 return self.header_data[section]
             return None
 
+        # TODO: Remove?
         def clear_contents(self) -> None:
             self.beginRemoveRows(QModelIndex(), 0, self.rowCount())
             self.table_data.clear()
@@ -678,7 +872,8 @@ class GathererWindow(QMainWindow):
         @Slot(str)
         def set_map_image(self, pixmap: QPixmap) -> None:
             # This will clear gathering point list
-            print("Setting map image")
+            # print("Setting map image")
+            # TODO: Don't need to redraw all the time
             self.gathering_point_set.clear()
             self.pixmap = pixmap
             self.update()
@@ -706,6 +901,8 @@ class GathererWindow(QMainWindow):
 
     set_auto_refresh_signal = Signal(bool)
     update_map_signal = Signal(int)
+    gathering_item_filter_added_signal = Signal(set)
+    gathering_item_filter_removed_signal = Signal(set)
 
     def __init__(
         self,
@@ -736,8 +933,15 @@ class GathererWindow(QMainWindow):
         self.status_bar_label = QLabel()
         self.statusBar().addPermanentWidget(self.status_bar_label, 1)
 
-        self.item_table = GathererWindow.ItemsTableWidget(self)
-        self.centre_splitter.addWidget(self.item_table)
+        # self.item_table = GathererWindow.ItemsTableWidget(self)
+        self.item_table_model = GathererWindow.ItemTableModel(self)
+        self.item_table_proxy_model = GathererWindow.ItemTableProxyModel(self)
+        self.item_table_proxy_model.setSourceModel(self.item_table_model)
+        # self.item_table_proxy_model.sort(4, Qt.DescendingOrder)
+        self.item_table_view = GathererWindow.ItemTableView(self)
+        self.item_table_view.setModel(self.item_table_proxy_model)
+        self.item_table_view.clicked.connect(self.on_item_table_clicked)  # type: ignore
+        self.centre_splitter.addWidget(self.item_table_view)
 
         # self.territory_table = GathererWindow.TerritoryTableWidget_(self)
         # TODO: Review delegate for sorting unique https://stackoverflow.com/questions/53324931/qsortfilterproxymodel-by-column-value
@@ -748,10 +952,10 @@ class GathererWindow(QMainWindow):
         self.territory_search_lineedit.textChanged.connect(  # type: ignore
             self.territory_table_proxy_model.setFilterRegularExpression
         )
-        self.item_table.gathering_item_filter_added_signal.connect(
+        self.gathering_item_filter_added_signal.connect(
             self.territory_table_proxy_model.gathering_item_filter_added
         )
-        self.item_table.gathering_item_filter_removed_signal.connect(
+        self.gathering_item_filter_removed_signal.connect(
             self.territory_table_proxy_model.gathering_item_filter_removed
         )
         self.territory_table_proxy_model.setSourceModel(self.territory_table_model)
@@ -784,7 +988,7 @@ class GathererWindow(QMainWindow):
             self.status_bar_label.setText
         )
         self.gatherer_worker.item_table_update_signal.connect(
-            self.item_table.on_item_table_update
+            self.item_table_model.on_item_table_update
         )
         self.gatherer_worker.territory_table_update_signal.connect(
             self.territory_table_model.on_item_table_update
@@ -798,10 +1002,10 @@ class GathererWindow(QMainWindow):
         self.gatherer_worker.gathering_item_to_territory_changed_signal.connect(
             self.territory_table_proxy_model.on_gathering_item_to_territory_dict_changed
         )
-        self.item_table.gathering_item_filter_added_signal.connect(
+        self.gathering_item_filter_added_signal.connect(
             self.gatherer_worker.gathering_item_filter_added
         )
-        self.item_table.gathering_item_filter_removed_signal.connect(
+        self.gathering_item_filter_removed_signal.connect(
             self.gatherer_worker.gathering_item_filter_removed
         )
 
@@ -811,7 +1015,25 @@ class GathererWindow(QMainWindow):
     def on_refresh_button_clicked(self):
         self.set_auto_refresh_signal.emit(True)
 
-    @Slot(int, int)
+    @Slot(QModelIndex)
+    def on_item_table_clicked(self, table_view_item: QModelIndex):
+        print(
+            f"Clicked on {table_view_item.row()} {table_view_item.column()}, {table_view_item.data()}"
+        )
+        table_data_item = self.item_table_proxy_model.mapToSource(table_view_item)
+        print(
+            f"Data item: {table_data_item.row()} {table_data_item.column()}, {table_data_item.data()}"
+        )
+        if table_view_item in self.item_table_view.selectedIndexes():
+            self.gathering_item_filter_added_signal.emit(
+                self.item_table_model.table_data[table_view_item.row()][-1]
+            )
+        else:
+            self.gathering_item_filter_removed_signal.emit(
+                self.item_table_model.table_data[table_view_item.row()][-1]
+            )
+
+    @Slot(QModelIndex)
     def on_territory_table_clicked(self, item: QModelIndex) -> None:
         print(f"Clicked on {item.row()} {item.column()}, {item.data()}")
         data_item = self.territory_table_proxy_model.mapToSource(item)
@@ -819,7 +1041,6 @@ class GathererWindow(QMainWindow):
         self.update_map_signal.emit(
             self.territory_table_model.table_data[data_item.row()][-1]
         )
-        # THis is probably wrong?
 
     def closeEvent(self, event) -> None:
         print("exiting Gatherer...")

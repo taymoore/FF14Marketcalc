@@ -168,7 +168,7 @@ def yield_recipes(
         and classjob_level in recipe_classjob_level_list[classjob_id]
     ):
         url_list = recipe_classjob_level_list[classjob_id][classjob_level]
-        print(f"{len(url_list)} recipes")
+        # print(f"{len(url_list)} recipes")
         recipe_classjob_level_list_mutex.unlock()
         for url in url_list:
             yield get_recipe(url)

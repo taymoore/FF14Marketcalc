@@ -140,7 +140,7 @@ class CraftingWorker(QThread):
     @Slot(list)
     def refresh_listings(self, recipe_list: List[Recipe] = None) -> None:
         recipe_list = recipe_list if recipe_list else self.recipe_list
-        print(f"Refreshing listings for {len(recipe_list)} recipes")
+        # print(f"Refreshing listings for {len(recipe_list)} recipes")
         for recipe_index, recipe in enumerate(recipe_list):
             # self.print_status(
             #     f"Refreshing marketboard data {recipe_index+1}/{len(recipe_list)} ({recipe.ItemResult.Name})..."
