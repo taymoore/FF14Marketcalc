@@ -100,18 +100,41 @@ class CraftingWorker(QThread):
     # Search for recipes given by the user
     @Slot(str)
     def on_search_recipe(self, search_string: str) -> None:
-        self.auto_refresh_listings = False
         print(f"Searching for '{search_string}'")
+        self._recipe_sent_to_table.clear()
         recipes = search_recipes(search_string)
+        print(f"Found {len(recipes)} recipes")
         if len(recipes) > 0:
-            self.refresh_listings(recipes)
+            self.refresh_listings(recipes, True)
+        self.auto_refresh_listings = False
 
     # Refresh button clicked by user
     @Slot(bool)
     def on_set_auto_refresh_listings(self, refresh: bool) -> None:
         self.auto_refresh_listings = refresh
         if refresh:
-            self.refresh_listings()
+            recipe: Recipe
+            for recipe_index, recipe in enumerate(self.recipe_list):
+                # self.print_status(
+                #     f"Refreshing marketboard data {recipe_index+1}/{len(recipe_list)} ({recipe.ItemResult.Name})..."
+                # )
+                QCoreApplication.processEvents()
+                if self.isInterruptionRequested():
+                    return
+                if not self.auto_refresh_listings:
+                    return
+                # t = time.time()
+                if (
+                    recipe.ItemResult.ID not in self._recipe_sent_to_table
+                    and not self.is_recipe_expired(recipe)
+                ):
+                    self._recipe_sent_to_table.append(recipe.ItemResult.ID)
+                    self.update_table_recipe(recipe)
+                    self.update_item_crafting_values(recipe)
+                # log_time(
+                #     f"Refreshing marketboard data {recipe_index+1}/{len(self.recipe_list)} ({recipe.ItemResult.Name})",
+                #     t,
+                # )
 
     def is_recipe_expired(self, recipe: Recipe) -> bool:
         time_s = time.time()
@@ -138,9 +161,11 @@ class CraftingWorker(QThread):
 
     # Refresh the listings for the current recipe list
     @Slot(list)
-    def refresh_listings(self, recipe_list: List[Recipe] = None) -> None:
+    def refresh_listings(
+        self, recipe_list: List[Recipe] = None, force_refresh: bool = False
+    ) -> None:
         recipe_list = recipe_list if recipe_list else self.recipe_list
-        # print(f"Refreshing listings for {len(recipe_list)} recipes")
+        print(f"Refreshing listings for {len(recipe_list)} recipes")
         for recipe_index, recipe in enumerate(recipe_list):
             # self.print_status(
             #     f"Refreshing marketboard data {recipe_index+1}/{len(recipe_list)} ({recipe.ItemResult.Name})..."
@@ -148,17 +173,20 @@ class CraftingWorker(QThread):
             QCoreApplication.processEvents()
             if self.isInterruptionRequested():
                 return
-            if (
-                recipe.ItemResult.ID not in self._recipe_sent_to_table
-                or self.is_recipe_expired(recipe)
+            if not self.auto_refresh_listings:
+                print("Not auto refreshing listings")
+                return
+            t = time.time()
+            if recipe.ItemResult.ID not in self._recipe_sent_to_table or (
+                self.is_recipe_expired(recipe) or force_refresh
             ):
                 self._recipe_sent_to_table.append(recipe.ItemResult.ID)
                 self.update_table_recipe(recipe)
                 self.update_item_crafting_values(recipe)
-            # log_time(
-            #     f"Refreshing marketboard data {recipe_index+1}/{len(recipe_list)} ({recipe.ItemResult.Name})",
-            #     t,
-            # )
+            log_time(
+                f"Refreshing marketboard data {recipe_index+1}/{len(recipe_list)} ({recipe.ItemResult.Name})",
+                t,
+            )
 
     def update_item_crafting_values(self, recipe: Recipe) -> None:
         def update_crafting_value_table(
