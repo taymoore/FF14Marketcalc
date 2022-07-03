@@ -98,6 +98,7 @@ class MainWindow(QMainWindow):
                     and recipe.RecipeLevelTable.ClassJobLevel > classjob_level
                 ):
                     keys_to_remove.append(recipe_id)
+            print(f"Removing {len(keys_to_remove)} rows")
             for key in keys_to_remove:
                 self.removeRow(self.table_data[key][0].row())
                 del self.table_data[key]
@@ -516,11 +517,12 @@ class MainWindow(QMainWindow):
     def on_classjob_level_value_changed(
         self, classjob_id: int, classjob_level: int
     ) -> None:
-        # print(f"ui: Classjob {classjob_id} level changed to {classjob_level}")
+        print(f"ui: Classjob {classjob_id} level changed to {classjob_level}")
         classjob_config = self.classjob_config[classjob_id]
         classjob_config.level = classjob_level
         self.classjob_config[classjob_id] = classjob_config
         self.table.remove_rows_above_level(classjob_id, classjob_level)
+        print(f"Removed rows above level {classjob_level}")
         self.classjob_level_changed.emit(classjob_id, classjob_level)
         _logger.info(f"updated {classjob_id} with {classjob_level}")
 

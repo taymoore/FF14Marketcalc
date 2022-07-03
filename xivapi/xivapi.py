@@ -133,7 +133,7 @@ get_recipe = Persist(_get_recipe, "recipes.json", 3600 * 24 * 30, Recipe)
 
 
 def get_recipe_by_id(recipe_id: int) -> Recipe:
-    return get_recipe(f"Recipe/{recipe_id}")
+    return get_recipe(f"/Recipe/{recipe_id}")
 
 
 def _get_recipes(classjob_id: int, classjob_level: int) -> RecipeCollection:
