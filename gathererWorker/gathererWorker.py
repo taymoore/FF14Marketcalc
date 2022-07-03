@@ -984,6 +984,7 @@ class GathererWindow(QMainWindow):
 
     @Slot()
     def on_refresh_button_clicked(self):
+        print("Refresh button clicked")
         self.territory_table_view.selectionModel().clearSelection()
         self.item_table_view.selectionModel().clearSelection()
         QCoreApplication.processEvents()
@@ -992,6 +993,8 @@ class GathererWindow(QMainWindow):
         self.selected_territory_id_set.clear()
         self.update_territory_filter()
         self.gathering_item_filter_cleared_signal.emit()
+        self.territory_table_view.update()
+        self.item_table_view.update()
         # self.set_auto_refresh_signal.emit(True)
 
     @Slot(QModelIndex)
@@ -1007,7 +1010,7 @@ class GathererWindow(QMainWindow):
         gathering_item_id = self.item_table_model.table_data[table_data_item.row()][-1]
         if table_view_item in self.item_table_view.selectedIndexes():
             print(
-                f"Adding {gathering_item_id} to {self.selected_gathering_item_id_set}"
+                f"table clicked: Adding gathering item {gathering_item_id} to {self.selected_gathering_item_id_set}"
             )
             self.selected_gathering_item_id_set.add(gathering_item_id)
             # self.territory_table_proxy_model.gathering_item_filter_added(
@@ -1017,7 +1020,7 @@ class GathererWindow(QMainWindow):
             self.gathering_item_filter_added_signal.emit(gathering_item_id)
         else:
             print(
-                f"Removing {gathering_item_id} from {self.selected_gathering_item_id_set}"
+                f"table clicked: Removing gathering item {gathering_item_id} from {self.selected_gathering_item_id_set}"
             )
             self.selected_gathering_item_id_set.discard(gathering_item_id)
             # self.territory_table_proxy_model.gathering_item_filter_removed(
@@ -1068,19 +1071,23 @@ class GathererWindow(QMainWindow):
             territory_id_filter_set.update(
                 self.gathering_item_to_territory_dict[gathering_item_id]
             )
+        print(
+            f"Updating territory filter from {self.territory_id_filter_set} to {territory_id_filter_set}"
+        )
         if self.territory_id_filter_set != territory_id_filter_set:
+            print(f"Selected territories: {self.selected_territory_id_set}")
             territory_to_deselect = (
-                self.selected_territory_id_set - self.territory_id_filter_set
+                self.selected_territory_id_set - territory_id_filter_set
             )
             self.territory_id_filter_set = territory_id_filter_set
             self.territory_table_proxy_model.set_territory_id_filter(
                 territory_id_filter_set
             )
             if len(territory_to_deselect) > 0:
-                print(
-                    f"Deselecting territories {self.selected_territory_id_set - territory_to_deselect}"
-                )
+                print(f"Deselecting territories {territory_to_deselect}")
+                print(f"Selected territories {self.selected_territory_id_set}")
                 self.selected_territory_id_set -= territory_to_deselect
+                print(f"Selected territories {self.selected_territory_id_set}")
                 self.update_gathering_item_filter()
 
     def update_gathering_item_filter(self) -> None:
@@ -1089,6 +1096,9 @@ class GathererWindow(QMainWindow):
             gathering_item_id_filter_set.update(
                 self.territory_to_gathering_item_dict[territory_id]
             )
+        print(
+            f"Updating gathering item filter from {self.gathering_item_id_filter_set} to {gathering_item_id_filter_set}"
+        )
         if self.gathering_item_id_filter_set != gathering_item_id_filter_set:
             gathering_items_to_deselect = (
                 self.selected_gathering_item_id_set - gathering_item_id_filter_set
@@ -1098,11 +1108,11 @@ class GathererWindow(QMainWindow):
                 gathering_item_id_filter_set
             )
             if len(gathering_items_to_deselect) > 0:
-                # TODO: Maybe this should be a call to the gatthering_items table?
-                print(
-                    f"Deselecting items {self.selected_gathering_item_id_set - gathering_items_to_deselect}"
-                )
+                # TODO: Maybe this should be a call to the gathering_items table?
+                print(f"Deselecting items {gathering_items_to_deselect}")
+                print(f"Selected items {self.selected_gathering_item_id_set}")
                 self.selected_gathering_item_id_set -= gathering_items_to_deselect
+                print(f"Selected items {self.selected_gathering_item_id_set}")
                 self.update_territory_filter()
 
     # @Slot(QItemSelection, QItemSelection)
