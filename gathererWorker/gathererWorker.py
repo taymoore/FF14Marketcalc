@@ -97,7 +97,7 @@ from xivapi.xivapi import (
 _logger = logging.getLogger(__name__)
 
 
-class GathererWorker(QThread):
+class GathererWorker(QObject):
     class GatheringItems(BaseModel):
         results_max: int = 0
         results_pulled: int = 0
@@ -118,6 +118,7 @@ class GathererWorker(QThread):
         parent: Optional[QObject] = None,
     ) -> None:
         self.world_id = world_id
+        self.abort = False
 
         # self.auto_refresh_enabled = True
         # self.user_selected_item_id = None
@@ -334,7 +335,7 @@ class GathererWorker(QThread):
             gathering_item.GameContentLinks.GatheringPointBase.yield_gathering_point_base_id()
         ):
             QCoreApplication.processEvents()
-            if self.isInterruptionRequested():
+            if self.abort:
                 return
             # print(f"Getting gathering point base {gathering_point_base_id}")
             gathering_point_base_list.append(
@@ -355,7 +356,7 @@ class GathererWorker(QThread):
             gathering_item.GameContentLinks.GatheringPointBase.yield_gathering_point_base_id()
         ):
             QCoreApplication.processEvents()
-            if self.isInterruptionRequested():
+            if self.abort:
                 return
             gathering_point_base = self.get_gathering_point_base(
                 gathering_point_base_id
@@ -371,7 +372,7 @@ class GathererWorker(QThread):
                 gathering_point_base.GameContentLinks.GatheringPoint.GatheringPointBase
             ):
                 QCoreApplication.processEvents()
-                if self.isInterruptionRequested():
+                if self.abort:
                     return
                 gathering_point = self.get_gathering_point(gathering_point_id)
                 if gathering_point.TerritoryTypeTargetID <= 1:
@@ -434,16 +435,17 @@ class GathererWorker(QThread):
         if update_map and self.selected_territory_id:
             self.update_map(self.selected_territory_id)
 
+    @Slot()
     def run(self):
         print("Starting gatherer worker")
         for gathering_item in self.yield_gathering_item():
             QCoreApplication.processEvents()
-            if self.isInterruptionRequested():
+            if self.abort:
                 return
             # print("Updating table item")
             self.update_table_item(gathering_item)
             QCoreApplication.processEvents()
-            if self.isInterruptionRequested():
+            if self.abort:
                 return
             # print("Updating table territory")
             self.update_table_territory(gathering_item)
@@ -454,7 +456,7 @@ class GathererWorker(QThread):
         self.gathering_point_base_dict.save_to_disk()
         self.gathering_point_dict.save_to_disk()
         self.territory_type_dict.save_to_disk()
-        self.requestInterruption()
+        self.abort = True
 
 
 class GathererWindow(QMainWindow):
@@ -946,9 +948,12 @@ class GathererWindow(QMainWindow):
                     **classjob.dict(), level=0
                 )
 
+        self.gatherer_worker_thread = QThread()
         self.gatherer_worker = GathererWorker(
             world_id=world_id, classjob_config_dict=self.classjob_config_dict
         )
+        self.gatherer_worker_thread.started.connect(self.gatherer_worker.run)
+        self.gatherer_worker.moveToThread(self.gatherer_worker_thread)
         self.gatherer_worker.status_bar_update_signal.connect(
             self.status_bar_label.setText
         )
@@ -980,7 +985,7 @@ class GathererWindow(QMainWindow):
             self.on_territory_to_gathering_item_dict_changed
         )
 
-        self.gatherer_worker.start(QThread.LowPriority)
+        self.gatherer_worker_thread.start(QThread.LowPriority)
 
     @Slot()
     def on_refresh_button_clicked(self):
@@ -1149,7 +1154,10 @@ class GathererWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         print("exiting Gatherer...")
+        self.gatherer_worker_thread.setPriority(QThread.NormalPriority)
         self.gatherer_worker.stop()
-        self.gatherer_worker.wait()
+        self.gatherer_worker_thread.quit()
         self.classjob_config_dict.save_to_disk()
+        self.gatherer_worker_thread.wait()
+        print("gatherer worker exited cleanly")
         super().closeEvent(event)

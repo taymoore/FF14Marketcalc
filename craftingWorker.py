@@ -29,7 +29,7 @@ from xivapi.xivapi import (
 )
 
 
-class CraftingWorker(QThread):
+class CraftingWorker(QObject):
     recipe_table_update_signal = Signal(
         Recipe, float, float
     )  # Recipe, profit, velocity
@@ -44,6 +44,7 @@ class CraftingWorker(QThread):
         parent: Optional[QObject] = None,
     ) -> None:
         # _logger = logging.getLogger(__name__)
+        self.abort = False
         self.world_id = world_id
         self.classjob_config_dict = classjob_config_dict
         self.classjob_level_current_dict: Dict[int, int] = {}
@@ -102,10 +103,14 @@ class CraftingWorker(QThread):
     def on_search_recipe(self, search_string: str) -> None:
         print(f"Searching for '{search_string}'")
         self._recipe_sent_to_table.clear()
-        recipes = search_recipes(search_string)
-        print(f"Found {len(recipes)} recipes")
-        if len(recipes) > 0:
-            self.refresh_listings(recipes, True)
+        recipe_list = search_recipes(search_string)
+        print(f"Found {len(recipe_list)} recipes")
+        # if len(recipe_list) > 0:
+        # self.refresh_listings(recipes, True)
+        recipe: Recipe
+        for recipe_index, recipe in enumerate(recipe_list):
+            self._recipe_sent_to_table.append(recipe.ItemResult.ID)
+            self.update_table_recipe(recipe)
         self.auto_refresh_listings = False
 
     # Refresh button clicked by user
@@ -118,19 +123,17 @@ class CraftingWorker(QThread):
                 # self.print_status(
                 #     f"Refreshing marketboard data {recipe_index+1}/{len(recipe_list)} ({recipe.ItemResult.Name})..."
                 # )
-                QCoreApplication.processEvents()
-                if self.isInterruptionRequested():
-                    return
-                if not self.auto_refresh_listings:
-                    return
+
+                # QCoreApplication.processEvents()
+                # if self.thread().isInterruptionRequested():
+                #     return
+                # if not self.auto_refresh_listings:
+                #     return
+
                 # t = time.time()
-                if (
-                    recipe.ItemResult.ID not in self._recipe_sent_to_table
-                    and not self.is_recipe_expired(recipe)
-                ):
+                if recipe.ItemResult.ID not in self._recipe_sent_to_table:
                     self._recipe_sent_to_table.append(recipe.ItemResult.ID)
                     self.update_table_recipe(recipe)
-                    self.update_item_crafting_values(recipe)
                 # log_time(
                 #     f"Refreshing marketboard data {recipe_index+1}/{len(self.recipe_list)} ({recipe.ItemResult.Name})",
                 #     t,
@@ -141,7 +144,7 @@ class CraftingWorker(QThread):
 
         def _is_recipe_expired(recipe: Recipe, time_s: float) -> bool:
             if is_listing_expired(recipe.ItemResult.ID, self.world_id, time_s):
-                print(f"Recipe Result {recipe.ItemResult.Name} is expired")
+                # print(f"Recipe Result {recipe.ItemResult.Name} is expired")
                 return True
             for ingredient_index in range(9):
                 item: Item = getattr(recipe, f"ItemIngredient{ingredient_index}")
@@ -171,22 +174,22 @@ class CraftingWorker(QThread):
             #     f"Refreshing marketboard data {recipe_index+1}/{len(recipe_list)} ({recipe.ItemResult.Name})..."
             # )
             QCoreApplication.processEvents()
-            if self.isInterruptionRequested():
+            if self.abort:
                 return
             if not self.auto_refresh_listings:
                 print("Not auto refreshing listings")
                 return
-            t = time.time()
+            # t = time.time()
             if recipe.ItemResult.ID not in self._recipe_sent_to_table or (
                 self.is_recipe_expired(recipe) or force_refresh
             ):
                 self._recipe_sent_to_table.append(recipe.ItemResult.ID)
                 self.update_table_recipe(recipe)
                 self.update_item_crafting_values(recipe)
-            log_time(
-                f"Refreshing marketboard data {recipe_index+1}/{len(recipe_list)} ({recipe.ItemResult.Name})",
-                t,
-            )
+            # log_time(
+            #     f"Refreshing marketboard data {recipe_index+1}/{len(recipe_list)} ({recipe.ItemResult.Name})",
+            #     t,
+            # )
 
     def update_item_crafting_values(self, recipe: Recipe) -> None:
         def update_crafting_value_table(
@@ -194,7 +197,7 @@ class CraftingWorker(QThread):
         ):
             for ingredient_index in range(9):
                 QCoreApplication.processEvents()
-                if self.isInterruptionRequested():
+                if self.abort:
                     return
                 quantity: int = getattr(recipe, f"AmountIngredient{ingredient_index}")
                 item: Item = getattr(recipe, f"ItemIngredient{ingredient_index}")
@@ -226,12 +229,13 @@ class CraftingWorker(QThread):
         self.crafting_value_table_changed.emit(self._item_crafting_value_table)
 
     # Run the worker thread
+    @Slot()
     def run(self):
         print("Starting crafting worker")
-        while not self.isInterruptionRequested():
+        while not self.abort:
             for classjob in self.classjob_config_dict.values():
                 QCoreApplication.processEvents()
-                if self.isInterruptionRequested():
+                if self.abort:
                     return
                 if (
                     classjob_level := self.classjob_level_current_dict.setdefault(
@@ -248,12 +252,14 @@ class CraftingWorker(QThread):
                     for recipe in yield_recipes(classjob.ID, classjob_level):
                         # print("polling for interrupt")
                         QCoreApplication.processEvents()
-                        if self.isInterruptionRequested():
+                        if self.abort:
+                            print("Stopping crafting worker")
                             return
                         # print("interrupts processed")
                         self.recipe_list.append(recipe)
                         QCoreApplication.processEvents()
-                        if self.isInterruptionRequested():
+                        if self.abort:
+                            print("Stopping crafting worker")
                             return
                         self.update_item_crafting_values(recipe)
                         # self.print_status(
@@ -280,14 +286,16 @@ class CraftingWorker(QThread):
                     ):
                         print("Recipes found, stopping sleep")
                         break
-                    if self.isInterruptionRequested():
+                    if self.abort:
                         print("Interruption Received")
                         return
+        print("Stopping crafting worker")
 
     def print_status(self, string: str) -> None:
         self.status_bar_update_signal.emit(string)
 
     def stop(self):
         print("Stopping crafting worker")
-        self.requestInterruption()
-        # self.quit()
+        # self.thread().requestInterruption()
+        self.abort = True
+        # self.thread().quit()

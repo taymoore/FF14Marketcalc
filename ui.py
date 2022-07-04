@@ -5,7 +5,16 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 import numpy as np
 import pyperclip
-from PySide6.QtCore import Slot, Signal, QSize, QThread, QSemaphore, Qt, QBasicTimer
+from PySide6.QtCore import (
+    Slot,
+    Signal,
+    QSize,
+    QThread,
+    QSemaphore,
+    Qt,
+    QBasicTimer,
+    QCoreApplication,
+)
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QApplication,
@@ -480,10 +489,15 @@ class MainWindow(QMainWindow):
             world_id=world_id,
             classjob_config_dict=self.classjob_config,
         )
+        self.crafting_worker_thread = QThread()
+        self.crafting_worker.moveToThread(self.crafting_worker_thread)
+        self.crafting_worker_thread.started.connect(self.crafting_worker.run)
+        self.crafting_worker_thread.finished.connect(self.crafting_worker.deleteLater)
         self.crafting_worker.status_bar_update_signal.connect(
             self.status_bar_label.setText
         )
         self.crafting_worker.recipe_table_update_signal.connect(
+            # self.table.on_recipe_table_update, Qt.BlockingQueuedConnection
             self.table.on_recipe_table_update
         )
         self.classjob_level_changed.connect(self.crafting_worker.set_classjob_level)
@@ -507,7 +521,8 @@ class MainWindow(QMainWindow):
             self.retainer_table.on_listing_data_updated
         )
 
-        self.crafting_worker.start(QThread.LowPriority)
+        self.crafting_worker_thread.start(QThread.LowPriority)
+        # self.crafting_worker_thread.start()
         self.retainerworker.load_cache(
             self.crafting_worker.seller_listings_matched_signal
         )
@@ -660,14 +675,23 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         print("exiting ui...")
+        self.crafting_worker_thread.setPriority(QThread.NormalPriority)
         self.crafting_worker.stop()
-        self.crafting_worker.wait()
+        self.crafting_worker_thread.quit()
+        self.crafting_worker_thread.wait()
+        print("crafting worker closed")
+
         self.retainerworker_thread.quit()
         self.retainerworker_thread.wait()
+        print("retainer worker closed")
         self.classjob_config.save_to_disk()
+        print("classjob config saved")
         universalis_save_to_disk()
+        print("universalis saved")
         xivapi_save_to_disk()
+        print("xivapi saved")
         self.retainerworker.save_cache()
+        print("retainer cache saved")
         super().closeEvent(event)
 
 
