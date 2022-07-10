@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 import pickle
 from typing import Any, Dict, List, Optional, Tuple, TypeVar, Union
 import logging
@@ -20,54 +21,38 @@ get_content_time = time.time() - GET_CONTENT_RATE
 universalis_mutex = QMutex()
 
 CACHE_TIMEOUT_S = 3600 * 4
-CACHE_FILENAME = "listings.json"
+CACHE_FILENAME = "listings.bin"
 
 cache: Dict[Any, Tuple[Listings, float]]
 try:
-    cache = {
-        param: (
-            Listings.parse_raw(value[0]),
-            value[1],
-        )
-        for param, value in json.load(open(f".data/{CACHE_FILENAME}", "r")).items()
-    }
-    for cache_tuple in cache.values():
-        listings = cache_tuple[0]
-        listings.history = (
-            pd.read_json(listings.history, convert_axes=False)
-            if listings.history is not None
-            else pd.DataFrame(columns=["Price"])
-        )
-        listings.listing_history = (
-            pd.read_json(listings.listing_history, convert_axes=False)
-            if listings.listing_history is not None
-            else pd.DataFrame(columns=["Price"])
-        )
-        listings.history.index = listings.history.index.astype("float64")
-        listings.listing_history.index = listings.listing_history.index.astype(
-            "float64"
-        )
+    if Path(f".data/{CACHE_FILENAME}").exists():
+        cache = pickle.load(open(f".data/{CACHE_FILENAME}", "rb"))
+    else:
+        cache = {}
+        _logger.info("Created new listings cache")
+    # for cache_tuple in cache.values():
+    #     listings = cache_tuple[0]
+    #     listings.history = (
+    #         pd.read_json(listings.history, convert_axes=False)
+    #         if listings.history is not None
+    #         else pd.DataFrame(columns=["Price"])
+    #     )
+    #     listings.listing_history = (
+    #         pd.read_json(listings.listing_history, convert_axes=False)
+    #         if listings.listing_history is not None
+    #         else pd.DataFrame(columns=["Price"])
+    #     )
+    #     listings.history.index = listings.history.index.astype("float64")
+    #     listings.listing_history.index = listings.listing_history.index.astype(
+    #         "float64"
+    #     )
 except (IOError, ValueError):
     _logger.log(logging.WARN, f"Error loading {CACHE_FILENAME} cache")
     cache = {}
 
 
 def save_to_disk() -> None:
-    for cache_tuple in cache.values():
-        listings = cache_tuple[0]
-        listings.history = listings.history.to_json()
-        listings.listing_history = listings.listing_history.to_json()
-    try:
-        new_cache: Dict[Any, Tuple[str, float]] = {
-            param: (
-                value[0].json(),
-                value[1],
-            )
-            for param, value in cache.items()
-        }
-        json.dump(new_cache, open(f".data/{CACHE_FILENAME}", "w"), indent=2)
-    except Exception as e:
-        print(str(e))
+    pickle.dump(cache, open(f".data/{CACHE_FILENAME}", "wb"))
 
 
 def _get_listings(id: int, world: Union[int, str]) -> Listings:
