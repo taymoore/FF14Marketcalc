@@ -31,7 +31,7 @@ from xivapi.xivapi import (
 
 class CraftingWorker(QObject):
     recipe_table_update_signal = Signal(
-        Recipe, float, float
+        Recipe, float, Listings
     )  # Recipe, profit, velocity
     status_bar_update_signal = Signal(str)
     seller_listings_matched_signal = Signal(Listings)
@@ -93,10 +93,10 @@ class CraftingWorker(QObject):
         # print(f"Getting profit for {recipe.ItemResult.Name}")
         profit = get_profit(recipe, self.world_id)
         # print(f"Getting velocity for {recipe.ItemResult.Name}")
-        regularSaleVelocity = get_listings(
+        listings = get_listings(
             recipe.ItemResult.ID, self.world_id
-        ).regularSaleVelocity
-        self.recipe_table_update_signal.emit(recipe, profit, regularSaleVelocity)
+        )
+        self.recipe_table_update_signal.emit(recipe, profit, listings)
 
     # Search for recipes given by the user
     @Slot(str)
@@ -167,8 +167,9 @@ class CraftingWorker(QObject):
     def refresh_listings(
         self, recipe_list: List[Recipe] = None, force_refresh: bool = False
     ) -> None:
-        recipe_list = recipe_list if recipe_list else self.recipe_list
+        recipe_list = recipe_list if recipe_list else self.recipe_list.copy()
         print(f"Refreshing listings for {len(recipe_list)} recipes")
+        t = time.time()
         for recipe_index, recipe in enumerate(recipe_list):
             # self.print_status(
             #     f"Refreshing marketboard data {recipe_index+1}/{len(recipe_list)} ({recipe.ItemResult.Name})..."
@@ -176,7 +177,7 @@ class CraftingWorker(QObject):
             QCoreApplication.processEvents()
             if self.abort:
                 return
-            if not self.auto_refresh_listings:
+            if not self.auto_refresh_listings and not force_refresh:
                 print("Not auto refreshing listings")
                 return
             # t = time.time()
@@ -190,6 +191,7 @@ class CraftingWorker(QObject):
             #     f"Refreshing marketboard data {recipe_index+1}/{len(recipe_list)} ({recipe.ItemResult.Name})",
             #     t,
             # )
+        log_time(f"Refreshing {len(recipe_list)} listings", t)
 
     def update_item_crafting_values(self, recipe: Recipe) -> None:
         def update_crafting_value_table(
@@ -208,7 +210,7 @@ class CraftingWorker(QObject):
                 ) + (
                     quantity
                     * float(item.LevelItem)
-                    / self.classjob_config_dict[recipe.ClassJob.ID].level
+                    / max(self.classjob_config_dict[recipe.ClassJob.ID].level, 1)
                 )
                 ingredient_recipes: Optional[Tuple[Recipe, ...]] = getattr(
                     recipe, f"ItemIngredientRecipe{ingredient_index}"

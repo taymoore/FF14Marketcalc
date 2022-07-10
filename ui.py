@@ -80,9 +80,9 @@ class MainWindow(QMainWindow):
     class RecipeListTable(QTableWidget):
         def __init__(self, *args):
             super().__init__(*args)
-            self.setColumnCount(5)
+            self.setColumnCount(7)
             self.setHorizontalHeaderLabels(
-                ["Job", "Item", "Profit", "Velocity", "Score"]
+                ["Job", "Lvl", "Item", "Profit", "Velocity", "Listings", "Score"]
             )
             self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
             self.verticalHeader().hide()
@@ -112,30 +112,34 @@ class MainWindow(QMainWindow):
                 self.removeRow(self.table_data[key][0].row())
                 del self.table_data[key]
 
-        @Slot(Recipe, float, float)
+        @Slot(Recipe, float, Listings)
         def on_recipe_table_update(
-            self, recipe: Recipe, profit: float, velocity: float
+            self, recipe: Recipe, profit: float, listings: Listings
         ) -> None:
             if recipe.ID in self.table_data:
                 row = self.table_data[recipe.ID]
-                row[2].setText(f"{profit:,.0f}")
-                row[3].setText(f"{velocity:.2f}")
-                row[4].setText(f"{profit * velocity:,.0f}")
+                row[3].setText(f"{profit:,.0f}")
+                row[4].setText(f"{listings.regularSaleVelocity:.2f}")
+                row[6].setText(f"{profit * listings.regularSaleVelocity:,.0f}")
             else:
                 row: List[QTableWidgetItem] = []
-                row.append(QTableWidgetFloatItem(recipe.ClassJob.Abbreviation))
-                row.append(QTableWidgetFloatItem(recipe.ItemResult.Name))
+                row.append(QTableWidgetItem(recipe.ClassJob.Abbreviation))
+                row.append(QTableWidgetItem(str(recipe.RecipeLevelTable.ClassJobLevel)))
+                row.append(QTableWidgetItem(recipe.ItemResult.Name))
                 row.append(QTableWidgetFloatItem(f"{profit:,.0f}"))
-                row.append(QTableWidgetFloatItem(f"{velocity:.2f}"))
-                row.append(QTableWidgetFloatItem(f"{profit * velocity:,.0f}"))
+                row.append(QTableWidgetFloatItem(f"{listings.regularSaleVelocity:.2f}"))
+                row.append(QTableWidgetItem(str(len(listings.listings))))
+                row.append(QTableWidgetFloatItem(f"{profit * listings.regularSaleVelocity:,.0f}"))
                 self.insertRow(self.rowCount())
                 self.setItem(self.rowCount() - 1, 0, row[0])
                 self.setItem(self.rowCount() - 1, 1, row[1])
                 self.setItem(self.rowCount() - 1, 2, row[2])
                 self.setItem(self.rowCount() - 1, 3, row[3])
                 self.setItem(self.rowCount() - 1, 4, row[4])
+                self.setItem(self.rowCount() - 1, 5, row[5])
+                self.setItem(self.rowCount() - 1, 6, row[6])
                 self.table_data[recipe.ID] = row
-            self.sortItems(4, Qt.DescendingOrder)
+            self.sortItems(6, Qt.DescendingOrder)
 
     class RetainerTable(QTableWidget):
         def __init__(self, parent: QWidget, seller_id: int):
