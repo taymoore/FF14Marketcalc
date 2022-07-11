@@ -70,8 +70,9 @@ from xivapi.xivapi import (
 )
 from xivapi.xivapi import save_to_disk as xivapi_save_to_disk
 
+logging.basicConfig(level=logging.DEBUG, format=' %(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
 _logger = logging.getLogger(__name__)
-_logger.setLevel(logging.DEBUG)
 
 world_id = 55
 
