@@ -81,9 +81,9 @@ class MainWindow(QMainWindow):
     class RecipeListTable(QTableWidget):
         def __init__(self, *args):
             super().__init__(*args)
-            self.setColumnCount(7)
+            self.setColumnCount(8)
             self.setHorizontalHeaderLabels(
-                ["Job", "Lvl", "Item", "Profit", "Velocity", "Listings", "Score"]
+                ["Job", "Lvl", "Item", "Profit", "Velocity", "Lists", "Sp", "Score"]
             )
             self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
             self.verticalHeader().hide()
@@ -115,22 +115,25 @@ class MainWindow(QMainWindow):
 
         @Slot(Recipe, float, Listings)
         def on_recipe_table_update(
-            self, recipe: Recipe, profit: float, listings: Listings
+            self, recipe: Recipe, profit: float, velocity: float, listing_count: int
         ) -> None:
             if recipe.ID in self.table_data:
                 row = self.table_data[recipe.ID]
                 row[3].setText(f"{profit:,.0f}")
-                row[4].setText(f"{listings.regularSaleVelocity:.2f}")
-                row[6].setText(f"{profit * listings.regularSaleVelocity:,.0f}")
+                row[4].setText(f"{velocity:.2f}")
+                row[5].setText(f"{listing_count}")
+                row[6].setText(f"{velocity / max(listing_count, 1):,.2f}")
+                row[7].setText(f"{profit * velocity:,.0f}")
             else:
                 row: List[QTableWidgetItem] = []
                 row.append(QTableWidgetItem(recipe.ClassJob.Abbreviation))
                 row.append(QTableWidgetItem(str(recipe.RecipeLevelTable.ClassJobLevel)))
                 row.append(QTableWidgetItem(recipe.ItemResult.Name))
                 row.append(QTableWidgetFloatItem(f"{profit:,.0f}"))
-                row.append(QTableWidgetFloatItem(f"{listings.regularSaleVelocity:.2f}"))
-                row.append(QTableWidgetItem(str(len(listings.listings))))
-                row.append(QTableWidgetFloatItem(f"{profit * listings.regularSaleVelocity:,.0f}"))
+                row.append(QTableWidgetFloatItem(f"{velocity:.2f}"))
+                row.append(QTableWidgetItem(str(listing_count)))
+                row.append(QTableWidgetFloatItem(f"{velocity / max(listing_count, 1):,.2f}"))
+                row.append(QTableWidgetFloatItem(f"{profit * velocity:,.0f}"))
                 self.insertRow(self.rowCount())
                 self.setItem(self.rowCount() - 1, 0, row[0])
                 self.setItem(self.rowCount() - 1, 1, row[1])
@@ -139,8 +142,9 @@ class MainWindow(QMainWindow):
                 self.setItem(self.rowCount() - 1, 4, row[4])
                 self.setItem(self.rowCount() - 1, 5, row[5])
                 self.setItem(self.rowCount() - 1, 6, row[6])
+                self.setItem(self.rowCount() - 1, 7, row[7])
                 self.table_data[recipe.ID] = row
-            self.sortItems(6, Qt.DescendingOrder)
+            self.sortItems(7, Qt.DescendingOrder)
 
     class RetainerTable(QTableWidget):
         def __init__(self, parent: QWidget, seller_id: int):
@@ -421,6 +425,10 @@ class MainWindow(QMainWindow):
         self.table_search_widget = QWidget()
 
         self.search_layout = QHBoxLayout()
+        # self.analyze_button = QPushButton(self)
+        # self.analyze_button.setText("Analyze")
+        # self.search_layout.addWidget(self.analyze_button)
+        # self.analyze_button.clicked.connect(self.on_table_double_clicked)
         self.search_label = QLabel(self)
         self.search_label.setText("Search:")
         self.search_layout.addWidget(self.search_label)
@@ -569,7 +577,7 @@ class MainWindow(QMainWindow):
             for widget_list in row_group_list:
                 if widget_list[0].row() != row:
                     continue
-                pyperclip.copy(widget_list[1].text())
+                pyperclip.copy(widget_list[2].text())
                 return
 
     @Slot(int, int)
@@ -577,7 +585,7 @@ class MainWindow(QMainWindow):
         for recipe_id, row_widget_list in self.table.table_data.items():
             if row_widget_list[0].row() == row:
                 break
-        pyperclip.copy(row_widget_list[1].text())
+        pyperclip.copy(row_widget_list[2].text())
         self.plot_listings(
             get_listings(get_recipe_by_id(recipe_id).ItemResult.ID, world_id)
         )
@@ -587,12 +595,18 @@ class MainWindow(QMainWindow):
         for recipe_id, row_widget_list in self.table.table_data.items():
             if row_widget_list[0].row() == row:
                 break
-        item_name = row_widget_list[1].text()
+        item_name = row_widget_list[2].text()
         print(f"item name: {item_name}")
         self.status_bar_label.setText(f"Processing {item_name}...")
+        QCoreApplication.processEvents()
+        recipe = get_recipe_by_id(recipe_id)
         self.recipe_textedit.setText(
-            print_recipe(get_recipe_by_id(recipe_id), world_id)
+            print_recipe(recipe, world_id)
         )
+        profit = get_profit(recipe, world_id)
+        listings = get_listings(recipe.ItemResult.ID, world_id)
+        self.table.on_recipe_table_update(recipe, profit, listings.regularSaleVelocity, len(listings.listings))
+        self.status_bar_label.setText(f"Done processing {item_name}...")
 
     def plot_listings(self, listings: Listings) -> None:
         self.price_graph.p1.clear()

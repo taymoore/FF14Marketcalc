@@ -31,7 +31,7 @@ from xivapi.xivapi import (
 
 class CraftingWorker(QObject):
     recipe_table_update_signal = Signal(
-        Recipe, float, Listings
+        Recipe, float, float, int
     )  # Recipe, profit, velocity
     status_bar_update_signal = Signal(str)
     seller_listings_matched_signal = Signal(Listings)
@@ -96,7 +96,7 @@ class CraftingWorker(QObject):
         listings = get_listings(
             recipe.ItemResult.ID, self.world_id
         )
-        self.recipe_table_update_signal.emit(recipe, profit, listings)
+        self.recipe_table_update_signal.emit(recipe, profit, listings.regularSaleVelocity, len(listings.listings))
 
     # Search for recipes given by the user
     @Slot(str)
@@ -168,7 +168,8 @@ class CraftingWorker(QObject):
         self, recipe_list: List[Recipe] = None, force_refresh: bool = False
     ) -> None:
         recipe_list = recipe_list if recipe_list else self.recipe_list.copy()
-        print(f"Refreshing listings for {len(recipe_list)} recipes")
+        # print(f"Refreshing listings for {len(recipe_list)} recipes")
+        num_of_recipes_updated = 0
         t = time.time()
         for recipe_index, recipe in enumerate(recipe_list):
             # self.print_status(
@@ -187,11 +188,14 @@ class CraftingWorker(QObject):
                 self._recipe_sent_to_table.append(recipe.ItemResult.ID)
                 self.update_table_recipe(recipe)
                 self.update_item_crafting_values(recipe)
+                if self.is_recipe_expired(recipe):
+                    num_of_recipes_updated += 1
             # log_time(
             #     f"Refreshing marketboard data {recipe_index+1}/{len(recipe_list)} ({recipe.ItemResult.Name})",
             #     t,
             # )
-        log_time(f"Refreshing {len(recipe_list)} listings", t)
+        if num_of_recipes_updated > 0:
+            log_time(f"Refreshing {num_of_recipes_updated} listings", t)
 
     def update_item_crafting_values(self, recipe: Recipe) -> None:
         def update_crafting_value_table(

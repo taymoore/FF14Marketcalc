@@ -8,7 +8,7 @@ import pandas as pd
 from pydantic import BaseModel
 import requests
 from PySide6.QtCore import QMutex, Signal
-from cache import Persist, persist_to_file
+from cache import Persist, get_size, persist_to_file
 
 from universalis.models import Listings
 from xivapi.models import Item, Recipe
@@ -22,6 +22,8 @@ universalis_mutex = QMutex()
 
 CACHE_TIMEOUT_S = 3600 * 4
 CACHE_FILENAME = "listings.bin"
+
+PRINT_CACHE_SIZE = False
 
 cache: Dict[Any, Tuple[Listings, float]]
 try:
@@ -50,6 +52,8 @@ except (IOError, ValueError):
     _logger.log(logging.WARN, f"Error loading {CACHE_FILENAME} cache")
     cache = {}
 
+if PRINT_CACHE_SIZE:
+    print(f"Size of listings cache: {len(cache)} {get_size(cache):,.0f} bytes")
 
 def save_to_disk() -> None:
     pickle.dump(cache, open(f".data/{CACHE_FILENAME}", "wb"))

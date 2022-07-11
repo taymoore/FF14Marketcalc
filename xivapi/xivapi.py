@@ -27,12 +27,14 @@ from xivapi.models import (
     Recipe,
     RecipeCollection,
 )
-from cache import Persist, PersistMapping
+from cache import Persist, PersistMapping, get_size
 
 _logger = logging.getLogger(__name__)
 
 GET_CONTENT_RATE = 0.05
 get_content_time = time.time() - GET_CONTENT_RATE
+
+PRINT_CACHE_SIZE = False
 
 xivapi_mutex = QMutex()
 
@@ -82,6 +84,8 @@ def _get_item(item_id: int) -> Item:
 
 get_item = Persist(_get_item, "items.json", 3600 * 24 * 30, Item)
 
+if PRINT_CACHE_SIZE:
+    print(f"Size of item cache: {len(get_item.cache)} {get_size(get_item):,.0f} bytes")
 
 def _get_classjob_doh_list() -> List[ClassJob]:
     classjob_doh_list = []
@@ -96,6 +100,9 @@ def _get_classjob_doh_list() -> List[ClassJob]:
 get_classjob_doh_list = Persist(
     _get_classjob_doh_list, "classjob_doh.json", 3600 * 24 * 30, ClassJobCollection
 )
+
+if PRINT_CACHE_SIZE:
+    print(f"Size of classjob cache: {len(get_classjob_doh_list.cache)} {get_size(get_classjob_doh_list):,.0f} bytes")
 
 
 def get_content_page_results(
@@ -130,6 +137,9 @@ def _get_recipe(url: str) -> Recipe:
 
 
 get_recipe = Persist(_get_recipe, "recipes.json", 3600 * 24 * 30, Recipe)
+
+if PRINT_CACHE_SIZE:
+    print(f"Size of recipe cache: {len(get_recipe.cache)} {get_size(get_recipe):,.0f} bytes")
 
 
 def get_recipe_by_id(recipe_id: int) -> Recipe:
