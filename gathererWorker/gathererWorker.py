@@ -65,6 +65,8 @@ from QTableWidgetFloatItem import QTableWidgetFloatItem
 from cache import PersistMapping, load_cache, save_cache
 from classjobConfig import ClassJobConfig
 from ff14marketcalc import get_profit, print_recipe
+from garlandtools.garlandtools import GarlandtoolsManager
+from garlandtools.models import Item as GarlandtoolsItem
 from itemCleaner.itemCleaner import ItemCleanerForm
 from retainerWorker.models import ListingData
 from universalis.models import Listings
@@ -80,9 +82,6 @@ from xivapi.models import (
     GatheringItem,
     GatheringPoint,
     GatheringPointBase,
-    Item,
-    Recipe,
-    RecipeCollection,
     TerritoryType,
 )
 from xivapi.xivapi import (
@@ -151,6 +150,8 @@ class GathererWorker(QObject):
         self.selected_territory_id: Optional[int] = None
         self.gathering_item_filter_set: Set[int] = set()
         super().__init__(parent)
+        self.garlandtools_manager = GarlandtoolsManager(self)
+        self.garlandtools_manager.item_received.connect(self.garlandtools_item_received)
 
     # @Slot(bool)
     # def set_auto_refresh(self, auto_refresh_enabled: bool) -> None:
@@ -282,9 +283,9 @@ class GathererWorker(QObject):
                 print(f"getting page {index//100+1}")
                 page = get_page("GatheringItem", index // 100 + 1)
                 self.gathering_items_dict.results_max = page.Pagination.ResultsTotal
-            print(
-                f"Getting item {index % 100} from page {self.gathering_items_dict.results_pulled // 100 + 1}"
-            )
+            # print(
+            #     f"Getting item {index % 100} from page {self.gathering_items_dict.results_pulled // 100 + 1}"
+            # )
             gathering_item: GatheringItem = get_content(
                 page.Results[index % 100].Url, GatheringItem
             )
@@ -346,6 +347,12 @@ class GathererWorker(QObject):
         self.item_table_update_signal.emit(
             gathering_item, gathering_point_base_list, profit, velocity
         )
+        if gathering_item.Item.AetherialReduce != 0:
+            self.garlandtools_manager.request_item(gathering_item.Item.ID)
+
+    @Slot(GarlandtoolsItem)
+    def garlandtools_item_received(self, item: GarlandtoolsItem) -> None:
+        print(f"garlandtools item received: {item.item.name}")
 
     def update_table_territory(self, gathering_item: GatheringItem) -> None:
         update_map = False
@@ -442,12 +449,10 @@ class GathererWorker(QObject):
             QCoreApplication.processEvents()
             if self.abort:
                 return
-            # print("Updating table item")
             self.update_table_item(gathering_item)
             QCoreApplication.processEvents()
             if self.abort:
                 return
-            # print("Updating table territory")
             self.update_table_territory(gathering_item)
 
     def stop(self):
@@ -456,6 +461,7 @@ class GathererWorker(QObject):
         self.gathering_point_base_dict.save_to_disk()
         self.gathering_point_dict.save_to_disk()
         self.territory_type_dict.save_to_disk()
+        self.garlandtools_manager.save_to_disk()
         self.abort = True
 
 

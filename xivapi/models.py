@@ -50,6 +50,7 @@ class Item(BaseModel):
     LevelItem: Optional[int]
     ID: int
     Name: str
+    AetherialReduce: int
 
     class Config:
         frozen = True
@@ -114,15 +115,6 @@ class RecipeCollection(BaseCollectionModel[Recipe]):
 
 
 # Gathering Stuff
-
-# class GatheringItemLevelTable(BaseModel):
-#     GatheringItemLevel: List[int]
-
-
-# class GatheringType(BaseModel):
-#     ID: int
-#     Name: str
-
 
 class GatheringPointBaseLink(BaseModel):
     Item0: Optional[List[int]]

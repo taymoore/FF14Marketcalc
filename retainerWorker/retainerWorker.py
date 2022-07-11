@@ -66,6 +66,7 @@ class RetainerWorker(QObject):
             listings=listings,
             timer=QBasicTimer(),
         )
+        print("building listing data")
         listing_data.timer.start(ROW_REFRESH_PERIOD_MS, self)
         return listing_data
 
