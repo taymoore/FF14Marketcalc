@@ -258,6 +258,7 @@ def save_to_disk() -> None:
 class XivapiManager(QObject):
     recipe_received = Signal(Recipe)
     item_received = Signal(Item)
+    status_bar_set_text_signal = Signal(str)
 
     class RequestType(IntEnum):
         ITEM = 0  # user requested item
@@ -278,7 +279,7 @@ class XivapiManager(QObject):
         self._get_content_rate = 0.05
         self._get_content_time = time.time() - self._get_content_rate
         self._network_access_manager = QNetworkAccessManager(self)
-        self._network_access_manager.finished.connect(self._on_request_finished)
+        self._network_access_manager.finished.connect(self._on_request_finished)  # type: ignore
         self._url_request_queue: List[XivapiManager.RequestTuple] = []
         self._request_timer = QTimer(self)
         self._request_timer.setSingleShot(True)
@@ -290,12 +291,13 @@ class XivapiManager(QObject):
         self._classjob_recipe_page_dict = PersistMapping[int, Dict[int, int]](
             "recipe_page.bin"
         )
-        self._classjob_id_level_max = Dict[int, Dict[int]] = {}
-        self._classjob_id_level_current = Dict[int, Dict[int]] = {}
+        self._classjob_id_level_max: Dict[int, int] = {}
+        self._classjob_id_level_current: Dict[int, int] = {}
 
         self.recipes = PersistMapping[int, Recipe]("recipies.bin")
         self.items = PersistMapping[int, Item]("items.bin")
 
+    @Slot(int, int)
     def set_classjob_id_level_max(
         self, classjob_id: int, classjob_level_max: int
     ) -> None:
@@ -344,7 +346,7 @@ class XivapiManager(QObject):
                     return
                 classjob_id = max(
                     self._classjob_id_level_current,
-                    key=self._classjob_id_level_current.get,
+                    key=lambda key: self._classjob_id_level_current[key],
                 )
                 classjob_level = self._classjob_id_level_current[classjob_id]
                 if self._classjob_recipe_page_dict[classjob_id][classjob_level] == -1:
@@ -375,7 +377,7 @@ class XivapiManager(QObject):
                 f"sleeping for {self._get_content_rate - now_time + self._get_content_time}s"
             )
             self._request_timer.start(
-                (self._get_content_rate - now_time + self._get_content_time) * 1000
+                int((self._get_content_rate - now_time + self._get_content_time) * 1000)
             )
         else:
             self._process_request_queue()
@@ -398,7 +400,9 @@ class XivapiManager(QObject):
                 f"Processing request {self._active_request.type.name} {self._active_request.url.toString()}"
             )
             network_request = QNetworkRequest(self._active_request.url)
+            xivapi_mutex.lock()  # eventually remove this
             self._network_access_manager.get(network_request)
+            xivapi_mutex.unlock()  # eventually remove this
             self._get_content_time = time.time()
         except Exception as e:
             print(str(e))
@@ -407,11 +411,12 @@ class XivapiManager(QObject):
     @Slot(QNetworkReply)
     def _on_request_finished(self, reply: QNetworkReply) -> None:
         try:
+            assert self._active_request is not None
             if reply.error() != QNetworkReply.NoError:
                 _logger.warning(reply.errorString())
                 heappush(self._url_request_queue, self._active_request)
                 self._active_request = None
-                self._request_timer.start(self._get_content_rate * 1000, self)
+                self._request_timer.start(int(self._get_content_rate * 1000))
                 reply.deleteLater()
                 return
             if self._active_request.type == XivapiManager.RequestType.ITEM:
@@ -428,7 +433,7 @@ class XivapiManager(QObject):
         finally:
             self._active_request = None
             if len(self._url_request_queue) > 0:
-                self._request_timer.start(self._get_content_rate * 1000, self)
+                self._request_timer.start(int(self._get_content_rate * 1000))
             reply.deleteLater()
 
     def _on_item_request_finished(self, reply: QNetworkReply) -> None:
@@ -455,14 +460,18 @@ class XivapiManager(QObject):
         except ValidationError as e:
             _logger.exception(e)
         else:
+            assert self._active_request is not None
             classjob_id = self._active_request.classjob_id
+            assert classjob_id is not None
             classjob_level = self._active_request.classjob_level
+            assert classjob_level is not None
             if page.Pagination.Page < page.Pagination.PageTotal:
                 self._request_recipe_index(
                     classjob_id,
                     classjob_level,
                     page.Pagination.PageNext,
                 )
+                assert self._active_request.page is not None
                 self._classjob_recipe_page_dict[classjob_id][
                     classjob_level
                 ] = self._active_request.page
