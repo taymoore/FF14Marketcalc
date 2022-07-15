@@ -70,7 +70,7 @@ from xivapi.xivapi import (
 )
 from xivapi.xivapi import save_to_disk as xivapi_save_to_disk
 
-logging.basicConfig(level=logging.DEBUG, format=' %(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format=' %(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 _logger = logging.getLogger(__name__)
 
@@ -697,8 +697,12 @@ class MainWindow(QMainWindow):
         self.crafting_worker_thread.setPriority(QThread.NormalPriority)
         self.crafting_worker.stop()
         self.crafting_worker_thread.quit()
-        self.crafting_worker_thread.wait()
-        print("crafting worker closed")
+        self.crafting_worker_thread.wait(20000)
+        if self.crafting_worker_thread.isRunning():
+            self.crafting_worker_thread.terminate()
+            print("crafting worker thread still running")
+        else:
+            print("crafting worker closed")
 
         self.retainerworker_thread.quit()
         self.retainerworker_thread.wait()

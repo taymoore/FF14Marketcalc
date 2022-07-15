@@ -96,7 +96,8 @@ class CraftingWorker(QObject):
         listings = get_listings(
             recipe.ItemResult.ID, self.world_id
         )
-        self.recipe_table_update_signal.emit(recipe, profit, listings.regularSaleVelocity, len(listings.listings))
+        if profit > 0 or not self.auto_refresh_listings:
+            self.recipe_table_update_signal.emit(recipe, profit, listings.regularSaleVelocity, len(listings.listings))
 
     # Search for recipes given by the user
     @Slot(str)
@@ -108,10 +109,10 @@ class CraftingWorker(QObject):
         # if len(recipe_list) > 0:
         # self.refresh_listings(recipes, True)
         recipe: Recipe
+        self.auto_refresh_listings = False
         for recipe_index, recipe in enumerate(recipe_list):
             self._recipe_sent_to_table.append(recipe.ItemResult.ID)
             self.update_table_recipe(recipe)
-        self.auto_refresh_listings = False
 
     # Refresh button clicked by user
     @Slot(bool)
