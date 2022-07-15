@@ -1,12 +1,15 @@
+from collections import namedtuple
 import json
 import logging
 from scipy import stats
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 import pandas as pd
 import numpy as np
 import pyperclip
 from PySide6.QtCore import (
+    QObject,
     Slot,
+    QSortFilterProxyModel,
     Signal,
     QSize,
     QThread,
@@ -14,9 +17,13 @@ from PySide6.QtCore import (
     Qt,
     QBasicTimer,
     QCoreApplication,
+    QModelIndex,
+    QPersistentModelIndex,
+    QAbstractTableModel,
 )
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
+    QTableView,
     QApplication,
     QWidget,
     QTableWidget,
@@ -70,81 +77,180 @@ from xivapi.xivapi import (
 )
 from xivapi.xivapi import save_to_disk as xivapi_save_to_disk
 
-logging.basicConfig(level=logging.DEBUG, format=' %(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format=' %(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 _logger = logging.getLogger(__name__)
+_logger.setLevel(logging.DEBUG)
 
 world_id = 55
 
 
 class MainWindow(QMainWindow):
-    class RecipeListTable(QTableWidget):
-        def __init__(self, *args):
-            super().__init__(*args)
-            self.setColumnCount(8)
-            self.setHorizontalHeaderLabels(
-                ["Job", "Lvl", "Item", "Profit", "Velocity", "Lists", "Sp", "Score"]
-            )
+    class RecipeTableView(QTableView):
+        def __init__(self, parent: Optional[QWidget] = None) -> None:
+            super().__init__(parent)
             self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
             self.verticalHeader().hide()
             self.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            self.setSelectionBehavior(QAbstractItemView.SelectRows)
+            self.setSortingEnabled(True)
+            self.sortByColumn(7, Qt.DescendingOrder)
 
-            # recipe_id -> row
-            self.table_data: Dict[int, List[QTableWidgetItem]] = {}
+    class RecipeTableProxyModel(QSortFilterProxyModel):
+        def __init__(self, parent: Optional[QWidget] = None) -> None:
+            super().__init__(parent)
+            self.setDynamicSortFilter(True)
 
-        def clear_contents(self) -> None:
-            self.clearContents()
-            self.setRowCount(0)
-            self.table_data.clear()
+        def lessThan(self, left, right):
+            leftData = self.sourceModel().data(left, Qt.UserRole)
+            rightData = self.sourceModel().data(right, Qt.UserRole)
+            return leftData < rightData
 
-        def remove_rows_above_level(
-            self, classjob_id: int, classjob_level: int
-        ) -> None:
-            keys_to_remove = []
-            for recipe_id in self.table_data.keys():
-                recipe = get_recipe_by_id(recipe_id)
-                if (
-                    recipe.ClassJob.ID == classjob_id
-                    and recipe.RecipeLevelTable.ClassJobLevel > classjob_level
-                ):
-                    keys_to_remove.append(recipe_id)
-            print(f"Removing {len(keys_to_remove)} rows")
-            for key in keys_to_remove:
-                self.removeRow(self.table_data[key][0].row())
-                del self.table_data[key]
+        def filterAcceptsRow(
+            self,
+            source_row: int,
+            source_parent: Union[QModelIndex, QPersistentModelIndex],
+        ) -> bool:
+            # source_model = self.sourceModel()
+            # if (
+            #     len(self.gathering_item_id_filter_set) == 0
+            #     or source_model.table_data[source_row][-1]
+            #     in self.gathering_item_id_filter_set
+            # ):
+            #     return super().filterAcceptsRow(source_row, source_parent)
+            # return False
+            return super().filterAcceptsRow(source_row, source_parent)
 
-        @Slot(Recipe, float, Listings)
-        def on_recipe_table_update(
-            self, recipe: Recipe, profit: float, velocity: float, listing_count: int
-        ) -> None:
-            if recipe.ID in self.table_data:
-                row = self.table_data[recipe.ID]
-                row[3].setText(f"{profit:,.0f}")
-                row[4].setText(f"{velocity:.2f}")
-                row[5].setText(f"{listing_count}")
-                row[6].setText(f"{velocity / max(listing_count, 1):,.2f}")
-                row[7].setText(f"{profit * velocity:,.0f}")
+    class RecipeTableModel(QAbstractTableModel):
+        RowData = namedtuple("RowData", ["classjob_abbreviation", "classjob_level", "item_name", "profit", "velocity", "listing_count", "speed", "score", "recipe_id"])
+
+        def __init__(self, parent: Optional[QObject] = None) -> None:
+            super().__init__(parent)
+            self.table_data: List[MainWindow.RecipeTableModel.RowData] = []
+            self.recipe_id_to_column_dict: Dict[int, int] = {}
+            self.header_data: List[str] = ["Job", "Lvl", "Item", "Profit", "Velocity", "Lists", "Sp", "Score"]
+
+        def rowCount(
+            self, parent: Union[QModelIndex, QPersistentModelIndex] = None
+        ) -> int:
+            return len(self.table_data)
+
+        def columnCount(
+            self, parent: Union[QModelIndex, QPersistentModelIndex] = None
+        ) -> int:
+            return 8
+
+        def data(  # type: ignore[override]
+            self,
+            index: QModelIndex,
+            role: Qt.ItemDataRole = Qt.DisplayRole,
+        ) -> Any:
+            if not index.isValid():
+                return None
+            if role == Qt.DisplayRole:
+                column = index.column()
+                cell_data = self.table_data[index.row()][column]
+                if column == 3 or column == 7:
+                    return f"{cell_data:,.0f}"
+                elif column == 4 or column == 6:
+                    return f"{cell_data:,.2f}"
+                elif column <= 2 or column == 5:
+                    return cell_data if cell_data else ""
+                else:
+                    return cell_data
+            elif role == Qt.UserRole:
+                return self.table_data[index.row()][column]
+            return None
+
+        def headerData(  # type: ignore[override]
+            self,
+            section: int,
+            orientation: Qt.Orientation,
+            role: Qt.ItemDataRole = Qt.DisplayRole,
+        ) -> Optional[str]:
+            if orientation == Qt.Horizontal and role == Qt.DisplayRole:
+                return self.header_data[section]
+            return None
+
+        @Slot(RowData)
+        def update_table(self, row_data: RowData) -> None:
+            if row_data.recipe_id in self.recipe_id_to_column_dict:
+                column = self.recipe_id_to_column_dict[row_data.recipe_id]
+                self.table_data[column] = row_data
             else:
-                row: List[QTableWidgetItem] = []
-                row.append(QTableWidgetItem(recipe.ClassJob.Abbreviation))
-                row.append(QTableWidgetItem(str(recipe.RecipeLevelTable.ClassJobLevel)))
-                row.append(QTableWidgetItem(recipe.ItemResult.Name))
-                row.append(QTableWidgetFloatItem(f"{profit:,.0f}"))
-                row.append(QTableWidgetFloatItem(f"{velocity:.2f}"))
-                row.append(QTableWidgetItem(str(listing_count)))
-                row.append(QTableWidgetFloatItem(f"{velocity / max(listing_count, 1):,.2f}"))
-                row.append(QTableWidgetFloatItem(f"{profit * velocity:,.0f}"))
-                self.insertRow(self.rowCount())
-                self.setItem(self.rowCount() - 1, 0, row[0])
-                self.setItem(self.rowCount() - 1, 1, row[1])
-                self.setItem(self.rowCount() - 1, 2, row[2])
-                self.setItem(self.rowCount() - 1, 3, row[3])
-                self.setItem(self.rowCount() - 1, 4, row[4])
-                self.setItem(self.rowCount() - 1, 5, row[5])
-                self.setItem(self.rowCount() - 1, 6, row[6])
-                self.setItem(self.rowCount() - 1, 7, row[7])
-                self.table_data[recipe.ID] = row
-            self.sortItems(7, Qt.DescendingOrder)
+                row_count = self.rowCount()
+                self.beginInsertRows(QModelIndex(), row_count, row_count)
+                self.table_data.append(row_data)
+                self.recipe_id_to_column_dict[row_data.recipe_id] = row_count
+                self.endInsertRows()
+
+    # class RecipeListTable(QTableWidget):
+    #     def __init__(self, *args):
+    #         super().__init__(*args)
+    #         self.setColumnCount(8)
+    #         self.setHorizontalHeaderLabels(
+    #             ["Job", "Lvl", "Item", "Profit", "Velocity", "Lists", "Sp", "Score"]
+    #         )
+    #         self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+    #         self.verticalHeader().hide()
+    #         self.setEditTriggers(QAbstractItemView.NoEditTriggers)
+
+    #         # recipe_id -> row
+    #         self.table_data: Dict[int, List[QTableWidgetItem]] = {}
+
+    #     def clear_contents(self) -> None:
+    #         self.clearContents()
+    #         self.setRowCount(0)
+    #         self.table_data.clear()
+
+    #     def remove_rows_above_level(
+    #         self, classjob_id: int, classjob_level: int
+    #     ) -> None:
+    #         keys_to_remove = []
+    #         for recipe_id in self.table_data.keys():
+    #             recipe = get_recipe_by_id(recipe_id)
+    #             if (
+    #                 recipe.ClassJob.ID == classjob_id
+    #                 and recipe.RecipeLevelTable.ClassJobLevel > classjob_level
+    #             ):
+    #                 keys_to_remove.append(recipe_id)
+    #         print(f"Removing {len(keys_to_remove)} rows")
+    #         for key in keys_to_remove:
+    #             self.removeRow(self.table_data[key][0].row())
+    #             del self.table_data[key]
+
+    #     @Slot(Recipe, float, Listings)
+    #     def on_recipe_table_update(
+    #         self, recipe: Recipe, profit: float, velocity: float, listing_count: int
+    #     ) -> None:
+    #         if recipe.ID in self.table_data:
+    #             row = self.table_data[recipe.ID]
+    #             row[3].setText(f"{profit:,.0f}")
+    #             row[4].setText(f"{velocity:.2f}")
+    #             row[5].setText(f"{listing_count}")
+    #             row[6].setText(f"{velocity / max(listing_count, 1):,.2f}")
+    #             row[7].setText(f"{profit * velocity:,.0f}")
+    #         else:
+    #             row: List[QTableWidgetItem] = []
+    #             row.append(QTableWidgetItem(recipe.ClassJob.Abbreviation))
+    #             row.append(QTableWidgetItem(str(recipe.RecipeLevelTable.ClassJobLevel)))
+    #             row.append(QTableWidgetItem(recipe.ItemResult.Name))
+    #             row.append(QTableWidgetFloatItem(f"{profit:,.0f}"))
+    #             row.append(QTableWidgetFloatItem(f"{velocity:.2f}"))
+    #             row.append(QTableWidgetItem(str(listing_count)))
+    #             row.append(QTableWidgetFloatItem(f"{velocity / max(listing_count, 1):,.2f}"))
+    #             row.append(QTableWidgetFloatItem(f"{profit * velocity:,.0f}"))
+    #             self.insertRow(self.rowCount())
+    #             self.setItem(self.rowCount() - 1, 0, row[0])
+    #             self.setItem(self.rowCount() - 1, 1, row[1])
+    #             self.setItem(self.rowCount() - 1, 2, row[2])
+    #             self.setItem(self.rowCount() - 1, 3, row[3])
+    #             self.setItem(self.rowCount() - 1, 4, row[4])
+    #             self.setItem(self.rowCount() - 1, 5, row[5])
+    #             self.setItem(self.rowCount() - 1, 6, row[6])
+    #             self.setItem(self.rowCount() - 1, 7, row[7])
+    #             self.table_data[recipe.ID] = row
+    #         self.sortItems(7, Qt.DescendingOrder)
 
     class RetainerTable(QTableWidget):
         def __init__(self, parent: QWidget, seller_id: int):

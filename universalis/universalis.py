@@ -1,19 +1,22 @@
 import json
+from collections import deque
 from pathlib import Path
 import pickle
-from typing import Any, Dict, List, Optional, Tuple, TypeVar, Union
+from typing import Any, Dict, List, Optional, Tuple, TypeVar, Union, Deque
 import logging
 import time
 import pandas as pd
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 import requests
-from PySide6.QtCore import QMutex, Signal
-from cache import Persist, get_size, persist_to_file
+from PySide6.QtCore import QMutex, QMutexLocker, QUrl, QTimer, QObject, QTimerEvent, Slot, Signal
+from PySide6.QtNetwork import QNetworkRequest, QNetworkAccessManager, QNetworkReply
+from cache import Persist, get_size, persist_to_file, PersistMapping
 
 from universalis.models import Listings
 from xivapi.models import Item, Recipe
 
 _logger = logging.getLogger(__name__)
+_logger.setLevel(logging.DEBUG)
 
 GET_CONTENT_RATE = 0.05
 get_content_time = time.time() - GET_CONTENT_RATE
@@ -187,3 +190,95 @@ def get_listings(
     data = cache[str(_args)][0]
     universalis_mutex.unlock()
     return data
+
+class UniversalisManager(QObject):
+    listings_received = Signal(Item)
+
+    def __init__(self, world_id: int, parent: Optional[QObject] = None) -> None:
+        super().__init__(parent)
+        self._world_id = world_id
+        self._get_content_rate = 0.05
+        self._get_content_time = time.time() - self._get_content_rate
+        self._cache_timeout = CACHE_TIMEOUT_S
+        self._garlandtools_mutex = QMutex()
+        self._network_access_manager = QNetworkAccessManager(self)
+        self._network_access_manager.finished.connect(self._on_request_finished)
+        self._url_request_queue: Deque[QUrl] = deque()
+        self._request_timer = QTimer(self)
+        self._request_timer.setSingleShot(True)
+        self._active_url_request = None
+        self.listings = PersistMapping[int, Listings]("listings.bin")   # key: item.id
+        self._listings_updated_time = PersistMapping[int, float]("listings_updated_time.bin")
+
+    def request_listings(self, item_id: int, world_id: int = None) -> None:
+        try:
+            if item_id in self.listings and time.time() - self._listings_updated_time[item_id] < self._cache_timeout:
+                self.listings_received.emit(self.listings[item_id])
+                return
+        except KeyError as e:
+            _logger.error(f"Error finding listings for item {item_id}: {e}")
+        self.get_content(item_id, world_id)
+
+    def get_content(self, item_id: int, world_id: int = None) -> None:
+        _world_id = world_id if world_id is not None else self._world_id
+        _logger.debug(f"Getting listings for item {item_id} in world {_world_id}")
+        url = QUrl(f"https://universalis.app/api/v2/{_world_id}/{item_id}?noGst=true")
+        self._url_request_queue.append(url)
+        if self._request_timer.isActive():
+            return
+        now_time = time.time()
+        if now_time - self._get_content_time < self._get_content_rate:
+            _logger.debug(f"sleeping for {self._get_content_rate - now_time + self._get_content_time}s")
+            self._request_timer.start((self._get_content_rate - now_time + self._get_content_time) * 1000)
+        else:
+            self._process_request_queue()
+
+    def timerEvent(self, event: QTimerEvent) -> None:
+        _logger.debug("timer handler called")
+        if event.timerId() == self._request_timer.timerId():
+            self._process_request_queue()
+        else:
+            super().timerEvent(event)
+
+    # Send a request to universalis
+    def _process_request_queue(self) -> None:
+        try:
+            assert len(self._url_request_queue) > 0
+            assert self._active_url_request is None
+            assert not self._request_timer.isActive()
+            _logger.debug(f"Processing request {self._url_request_queue[0].toString()}")
+            self._active_url_request = self._url_request_queue.popleft()
+            request = QNetworkRequest(self._active_url_request)
+            self._network_access_manager.get(request)
+            self._get_content_time = time.time()
+        except Exception as e:
+            print(str(e))
+
+    # Data received from universalis
+    @Slot(QNetworkReply)
+    def _on_request_finished(self, reply: QNetworkReply) -> None:
+        if reply.error() != QNetworkReply.NoError:
+            _logger.warning(reply.errorString())
+            self._url_request_queue.append(self._active_url_request)
+            self._active_url_request = None
+            self._request_timer.start(self._get_content_rate * 1000, self)
+            reply.deleteLater()
+            return
+        try:
+            listings = Listings.parse_raw(reply.readAll().data())
+        except ValidationError as e:
+            _logger.exception(e)
+        else:
+            self.listings[listings.itemID] = listings
+            self.listings_received.emit(listings)
+        finally:
+            self._active_url_request = None
+            if len(self._url_request_queue) > 0:
+                self._request_timer.start(self._get_content_rate * 1000, self)
+            reply.deleteLater()
+        # self._process_item(item)
+
+    # def _process_item(self, item: Item) -> None:
+
+    def save_to_disk(self) -> None:
+        self.listings.save_to_disk()

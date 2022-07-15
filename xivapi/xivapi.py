@@ -1,11 +1,20 @@
+from enum import Enum, IntEnum, auto
 from functools import partial
+from collections import defaultdict, deque, namedtuple
+from heapq import heappop, heappush
 import logging
+import re
 from typing import (
     Any,
     Callable,
+    DefaultDict,
+    Deque,
     Dict,
+    Iterator,
     List,
+    NamedTuple,
     Optional,
+    Set,
     Tuple,
     Type,
     TypeVar,
@@ -15,9 +24,20 @@ from typing import (
 import requests
 import time
 import json, atexit
+from autoslot import Slots
 from pydantic import BaseModel, ValidationError
 from pydantic_collections import BaseCollectionModel
-from PySide6.QtCore import QMutex, QMutexLocker
+from PySide6.QtCore import (
+    QMutex,
+    QMutexLocker,
+    QUrl,
+    QTimer,
+    QObject,
+    QTimerEvent,
+    Slot,
+    Signal,
+)
+from PySide6.QtNetwork import QNetworkRequest, QNetworkAccessManager, QNetworkReply
 from xivapi.models import (
     ClassJob,
     ClassJobCollection,
@@ -87,6 +107,7 @@ get_item = Persist(_get_item, "items.json", 3600 * 24 * 30, Item)
 if PRINT_CACHE_SIZE:
     print(f"Size of item cache: {len(get_item.cache)} {get_size(get_item):,.0f} bytes")
 
+
 def _get_classjob_doh_list() -> List[ClassJob]:
     classjob_doh_list = []
     for result_list in get_content_page_results("ClassJob"):
@@ -102,7 +123,9 @@ get_classjob_doh_list = Persist(
 )
 
 if PRINT_CACHE_SIZE:
-    print(f"Size of classjob cache: {len(get_classjob_doh_list.cache)} {get_size(get_classjob_doh_list):,.0f} bytes")
+    print(
+        f"Size of classjob cache: {len(get_classjob_doh_list.cache)} {get_size(get_classjob_doh_list):,.0f} bytes"
+    )
 
 
 def get_content_page_results(
@@ -139,7 +162,9 @@ def _get_recipe(url: str) -> Recipe:
 get_recipe = Persist(_get_recipe, "recipes.json", 3600 * 24 * 30, Recipe)
 
 if PRINT_CACHE_SIZE:
-    print(f"Size of recipe cache: {len(get_recipe.cache)} {get_size(get_recipe):,.0f} bytes")
+    print(
+        f"Size of recipe cache: {len(get_recipe.cache)} {get_size(get_recipe):,.0f} bytes"
+    )
 
 
 def get_recipe_by_id(recipe_id: int) -> Recipe:
@@ -228,3 +253,232 @@ def save_to_disk() -> None:
     get_classjob_doh_list.save_to_disk()
     get_recipe.save_to_disk()
     get_recipes.save_to_disk()
+
+
+class XivapiManager(QObject):
+    recipe_received = Signal(Recipe)
+    item_received = Signal(Item)
+
+    class RequestType(IntEnum):
+        ITEM = 0  # user requested item
+        RECIPE_MANUAL = 1  # user requested recipe
+        RECIPE_AUTO = 2  # background worker requested recipe
+        RECIPE_INDEX = 3  # background worker requested page of recipes
+
+    class RequestTuple(NamedTuple):
+        type: "XivapiManager.RequestType"
+        url: QUrl
+        classjob_level: Optional[int] = None
+        classjob_id: Optional[int] = None
+        page: Optional[int] = None
+
+    def __init__(self, world_id: int, parent: Optional[QObject] = None) -> None:
+        super().__init__(parent)
+        self._world_id = world_id
+        self._get_content_rate = 0.05
+        self._get_content_time = time.time() - self._get_content_rate
+        self._network_access_manager = QNetworkAccessManager(self)
+        self._network_access_manager.finished.connect(self._on_request_finished)
+        self._url_request_queue: List[XivapiManager.RequestTuple] = []
+        self._request_timer = QTimer(self)
+        self._request_timer.setSingleShot(True)
+        self._active_request: Optional[XivapiManager.RequestTuple] = None
+
+        self._classjob_recipe_id_dict = PersistMapping[int, DefaultDict[int, Set[int]]](
+            "recipe_index.bin", default=defaultdict(lambda: defaultdict(set))
+        )  # classjob_id -> classjob_level -> recipe_id
+        self._classjob_recipe_page_dict = PersistMapping[int, Dict[int, int]](
+            "recipe_page.bin"
+        )
+        self._classjob_id_level_max = Dict[int, Dict[int]] = {}
+        self._classjob_id_level_current = Dict[int, Dict[int]] = {}
+
+        self.recipes = PersistMapping[int, Recipe]("recipies.bin")
+        self.items = PersistMapping[int, Item]("items.bin")
+
+    def set_classjob_id_level_max(
+        self, classjob_id: int, classjob_level_max: int
+    ) -> None:
+        self._classjob_id_level_max[classjob_id] = classjob_level_max
+        self._classjob_id_level_current[classjob_id] = classjob_level_max
+        if not any(
+            request.type == XivapiManager.RequestType.RECIPE_INDEX
+            for request in self._url_request_queue
+        ):
+            self._request_recipe_index()
+
+    def request_recipe(self, recipe_id: int, auto: bool = False) -> None:
+        if recipe_id in self.recipes:
+            self.recipe_received.emit(self.recipes[recipe_id])
+            return
+        _logger.debug(f"Getting recipe for id {recipe_id}")
+        url = QUrl(f"https://xivapi.com/Recipe/{recipe_id}")
+        request = XivapiManager.RequestTuple(
+            type=XivapiManager.RequestType.RECIPE_MANUAL
+            if not auto
+            else XivapiManager.RequestType.RECIPE_AUTO,
+            url=url,
+        )
+        self._request_content(request)
+
+    def _request_recipe_index(
+        self,
+        classjob_id: Optional[int] = None,
+        classjob_level: Optional[int] = None,
+        page: int = 1,
+    ) -> None:
+        if classjob_id is None or classjob_level is None:
+            assert classjob_id is None
+            assert classjob_level is None
+            assert page == 1
+            assert not any(
+                request.type == XivapiManager.RequestType.RECIPE_INDEX
+                for request in self._url_request_queue
+            )
+            while classjob_id is None:
+                if all(
+                    classjob_level <= 0
+                    for classjob_level in self._classjob_id_level_current.values()
+                ):
+                    _logger.debug("No recipes to request")
+                    return
+                classjob_id = max(
+                    self._classjob_id_level_current,
+                    key=self._classjob_id_level_current.get,
+                )
+                classjob_level = self._classjob_id_level_current[classjob_id]
+                if self._classjob_recipe_page_dict[classjob_id][classjob_level] == -1:
+                    self._classjob_id_level_current[classjob_id] -= 1
+                    classjob_id = None
+        _logger.debug(
+            f"Getting recipe index for class {classjob_id} level {classjob_level} page {page}"
+        )
+        url = QUrl(
+            f"https://xivapi.com/search?filters=RecipeLevelTable.ClassJobLevel={classjob_level},ClassJob.ID={classjob_id}&page={page}"
+        )
+        request = XivapiManager.RequestTuple(
+            type=XivapiManager.RequestType.RECIPE_INDEX,
+            url=url,
+            classjob_level=classjob_level,
+            classjob_id=classjob_id,
+            page=page,
+        )
+        self._request_content(request)
+
+    def _request_content(self, request: RequestTuple) -> None:
+        heappush(self._url_request_queue, request)
+        if self._request_timer.isActive():
+            return
+        now_time = time.time()
+        if now_time - self._get_content_time < self._get_content_rate:
+            _logger.debug(
+                f"sleeping for {self._get_content_rate - now_time + self._get_content_time}s"
+            )
+            self._request_timer.start(
+                (self._get_content_rate - now_time + self._get_content_time) * 1000
+            )
+        else:
+            self._process_request_queue()
+
+    def timerEvent(self, event: QTimerEvent) -> None:
+        _logger.debug("timer handler called")
+        if event.timerId() == self._request_timer.timerId():
+            self._process_request_queue()
+        else:
+            super().timerEvent(event)
+
+    # Send a request to xivapi
+    def _process_request_queue(self) -> None:
+        try:
+            assert len(self._url_request_queue) > 0
+            assert self._active_request is None
+            assert not self._request_timer.isActive()
+            self._active_request = heappop(self._url_request_queue)
+            _logger.debug(
+                f"Processing request {self._active_request.type.name} {self._active_request.url.toString()}"
+            )
+            network_request = QNetworkRequest(self._active_request.url)
+            self._network_access_manager.get(network_request)
+            self._get_content_time = time.time()
+        except Exception as e:
+            print(str(e))
+
+    # Data received from universalis
+    @Slot(QNetworkReply)
+    def _on_request_finished(self, reply: QNetworkReply) -> None:
+        try:
+            if reply.error() != QNetworkReply.NoError:
+                _logger.warning(reply.errorString())
+                heappush(self._url_request_queue, self._active_request)
+                self._active_request = None
+                self._request_timer.start(self._get_content_rate * 1000, self)
+                reply.deleteLater()
+                return
+            if self._active_request.type == XivapiManager.RequestType.ITEM:
+                self._on_item_request_finished(reply)
+            elif (
+                self._active_request.type == XivapiManager.RequestType.RECIPE_AUTO
+                or self._active_request.type == XivapiManager.RequestType.RECIPE_MANUAL
+            ):
+                self._on_recipe_request_finished(reply)
+            elif self._active_request.type == XivapiManager.RequestType.RECIPE_INDEX:
+                self._on_recipe_index_request_finished(reply)
+            else:
+                raise Exception(f"Unknown request type {self._active_request.type}")
+        finally:
+            self._active_request = None
+            if len(self._url_request_queue) > 0:
+                self._request_timer.start(self._get_content_rate * 1000, self)
+            reply.deleteLater()
+
+    def _on_item_request_finished(self, reply: QNetworkReply) -> None:
+        try:
+            item = Item.parse_raw(reply.readAll().data())
+        except ValidationError as e:
+            _logger.exception(e)
+        else:
+            self.items[item.ID] = item
+            self.item_received.emit(item)
+
+    def _on_recipe_request_finished(self, reply: QNetworkReply) -> None:
+        try:
+            recipe = Recipe.parse_raw(reply.readAll().data())
+        except ValidationError as e:
+            _logger.exception(e)
+        else:
+            self.recipes[recipe.ID] = recipe
+            self.recipe_received.emit(recipe)
+
+    def _on_recipe_index_request_finished(self, reply: QNetworkReply) -> None:
+        try:
+            page = Page.parse_raw(reply.readAll().data())
+        except ValidationError as e:
+            _logger.exception(e)
+        else:
+            classjob_id = self._active_request.classjob_id
+            classjob_level = self._active_request.classjob_level
+            if page.Pagination.Page < page.Pagination.PageTotal:
+                self._request_recipe_index(
+                    classjob_id,
+                    classjob_level,
+                    page.Pagination.PageNext,
+                )
+                self._classjob_recipe_page_dict[classjob_id][
+                    classjob_level
+                ] = self._active_request.page
+            else:
+                self._classjob_recipe_page_dict[classjob_id][classjob_level] = -1
+                self._request_recipe_index()
+            for page_result in page.Results:
+                if page_result.UrlType == "Recipe":
+                    recipe_id = page_result.ID
+                    self._classjob_recipe_id_dict[classjob_id][classjob_level].add(
+                        recipe_id
+                    )
+                    self.request_recipe(recipe_id, True)
+
+    def save_to_disk(self) -> None:
+        self._classjob_recipe_id_dict.save_to_disk()
+        self._classjob_recipe_page_dict.save_to_disk()
+        self.recipes.save_to_disk()
+        self.items.save_to_disk()
