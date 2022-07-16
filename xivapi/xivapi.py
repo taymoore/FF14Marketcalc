@@ -434,6 +434,7 @@ class XivapiManager(QObject):
     @Slot(QNetworkReply)
     def _on_request_finished(self, reply: QNetworkReply) -> None:
         try:
+            assert self._active_request is not None
             if reply.error() != QNetworkReply.NoError:
                 _logger.warning(reply.errorString())
                 heappush(self._url_request_queue, self._active_request)

@@ -623,7 +623,9 @@ class MainWindow(QMainWindow):
         self.xivapi_manager.status_bar_set_text_signal.connect(
             self.status_bar_label.setText
         )
-        self.classjob_level_changed.connect(self.xivapi_manager.set_classjob_id_level_max)
+        self.classjob_level_changed.connect(
+            self.xivapi_manager.set_classjob_id_level_max
+        )
         self._xivapi_manager_thread.start(QThread.LowPriority)
 
         # Classjob level stuff!
@@ -644,6 +646,9 @@ class MainWindow(QMainWindow):
                 )
             )
             self.classjob_level_layout.addLayout(_classjob_level_layout)
+            self.xivapi_manager.set_classjob_id_level_max(
+                classjob_config.ID, classjob_config.level
+            )
             _classjob_level_layout.joblevel_value_changed.connect(
                 self.on_classjob_level_value_changed
             )
