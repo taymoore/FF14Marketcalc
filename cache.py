@@ -150,8 +150,11 @@ class PersistMapping(MutableMapping[KT, VT]):
             try:
                 with self.file_path.open("rb") as f:
                     self.data.update(pickle.load(f))
-            except (IOError, ValueError):
-                _logger.log(logging.WARN, f"Error loading {self.file_path} cache")
+            except (IOError, ValueError, EOFError, AttributeError) as e:
+                _logger.exception(e)
+                _logger.error(f"Corrupted {filename} cache. Deleting...")
+                input("Press Enter to continue...")
+                self.file_path.unlink()
         else:
             _logger.info(f"Created new {self.file_path} cache")
 

@@ -1,8 +1,9 @@
 from collections import namedtuple
 import json
 import logging
+from pathlib import Path
 from scipy import stats
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple, Union
 import pandas as pd
 import numpy as np
 import pyperclip
@@ -64,6 +65,7 @@ from universalis.models import Listings
 from craftingWorker import CraftingWorker
 from retainerWorker.retainerWorker import RetainerWorker
 from universalis.universalis import (
+    UniversalisManager,
     get_listings,
     set_seller_id,
 )
@@ -79,13 +81,23 @@ from xivapi.xivapi import (
 from xivapi.xivapi import save_to_disk as xivapi_save_to_disk
 
 logging.basicConfig(
-    level=logging.INFO, format=" %(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO,
+    format=" %(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.FileHandler(".data/debug.log"), logging.StreamHandler()],
 )
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.DEBUG)
 
 world_id = 55
+
+
+def create_default_directories() -> None:
+    Path(".data/").mkdir(exist_ok=True)
+    # Path(".logs/").mkdir(exist_ok=True)
+
+
+create_default_directories()
 
 
 class MainWindow(QMainWindow):
@@ -105,9 +117,16 @@ class MainWindow(QMainWindow):
             self.setDynamicSortFilter(True)
 
         def lessThan(self, left, right):
-            leftData = self.sourceModel().data(left, Qt.UserRole)
-            rightData = self.sourceModel().data(right, Qt.UserRole)
-            return leftData < rightData
+            left_data = self.sourceModel().data(left, Qt.UserRole)
+            right_data = self.sourceModel().data(right, Qt.UserRole)
+            if left_data is not None and right_data is not None:
+                return left_data < right_data
+            else:
+                return super().lessThan(left, right)
+            # elif right_data is None:
+            #     return False
+            # else:
+            #     return True
 
         def filterAcceptsRow(
             self,
@@ -125,20 +144,16 @@ class MainWindow(QMainWindow):
             return super().filterAcceptsRow(source_row, source_parent)
 
     class RecipeTableModel(QAbstractTableModel):
-        RowData = namedtuple(
-            "RowData",
-            [
-                "classjob_abbreviation",
-                "classjob_level",
-                "item_name",
-                "profit",
-                "velocity",
-                "listing_count",
-                "speed",
-                "score",
-                "recipe_id",
-            ],
-        )
+        class RowData(NamedTuple):
+            classjob_abbreviation: str
+            classjob_level: int
+            item_name: str
+            profit: Optional[float] = None
+            velocity: Optional[float] = None
+            listing_count: Optional[int] = None
+            speed: Optional[float] = None
+            score: Optional[float] = None
+            recipe_id: int = None
 
         def __init__(self, parent: Optional[QObject] = None) -> None:
             super().__init__(parent)
@@ -175,16 +190,20 @@ class MainWindow(QMainWindow):
             if role == Qt.DisplayRole:
                 column = index.column()
                 cell_data = self.table_data[index.row()][column]
-                if column == 3 or column == 7:
+                if cell_data is None:
+                    return ""
+                if column == 3 or column == 7:  # profit, score
                     return f"{cell_data:,.0f}"
-                elif column == 4 or column == 6:
+                elif column == 4 or column == 6:  # velocity, speed
                     return f"{cell_data:,.2f}"
-                elif column <= 2 or column == 5:
-                    return cell_data if cell_data else ""
+                elif (
+                    column <= 2 or column == 5
+                ):  # classjob_abbreviation, classjob_level, item_name, listing_count
+                    return cell_data
                 else:
                     return cell_data
             elif role == Qt.UserRole:
-                return self.table_data[index.row()][column]
+                return self.table_data[index.row()][index.column()]
             return None
 
         def headerData(  # type: ignore[override]
@@ -196,6 +215,29 @@ class MainWindow(QMainWindow):
             if orientation == Qt.Horizontal and role == Qt.DisplayRole:
                 return self.header_data[section]
             return None
+
+        # @Slot(Recipe)
+        def add_recipe(self, recipe: Recipe) -> None:
+            recipe_id = recipe.ID
+            _logger.debug(f"recipe_table_model.add_recipe: {recipe_id}")
+            if recipe_id not in self.recipe_id_to_column_dict:
+                row_count = self.rowCount()
+                self.beginInsertRows(QModelIndex(), row_count, row_count)
+                row_data = self.RowData(
+                    classjob_abbreviation=recipe.ClassJob.Abbreviation,
+                    classjob_level=recipe.RecipeLevelTable.ClassJobLevel,
+                    item_name=recipe.ItemResult.Name,
+                    recipe_id=recipe_id,
+                )
+                self.table_data.append(row_data)
+                self.recipe_id_to_column_dict[row_data.recipe_id] = row_count
+                self.endInsertRows()
+                # column = self.recipe_id_to_column_dict[recipe_id]
+                # row_data = self.table_data[column]
+                # row_data.classjob_abbreviation=recipe.ClassJob.Abbreviation
+                # row_data.classjob_level=recipe.RecipeLevelTable.ClassJobLevel
+                # row_data.item_name=recipe.ItemResult.Name
+                # # # self.dataChanged.emit(self.index(row, 0), self.index(row, 8))
 
         @Slot(RowData)
         def update_table(self, row_data: RowData) -> None:
@@ -524,6 +566,8 @@ class MainWindow(QMainWindow):
     classjob_level_changed = Signal(int, int)
     auto_refresh_listings_changed = Signal(bool)
     search_recipes = Signal(str)
+    request_listings = Signal(int, int)
+    # close_signal = Signal()
 
     def __init__(self):
         super().__init__()
@@ -624,9 +668,11 @@ class MainWindow(QMainWindow):
             self.status_bar_label.setText
         )
         self.classjob_level_changed.connect(
-            self.xivapi_manager.set_classjob_id_level_max
+            self.xivapi_manager.set_classjob_id_level_max_slot
         )
-        self._xivapi_manager_thread.start(QThread.LowPriority)
+        # self.xivapi_manager.recipe_received.connect(self.recipe_table_model.add_recipe)
+        self.xivapi_manager.recipe_received.connect(self.on_recipe_received)
+        # self._xivapi_manager_thread.start(QThread.LowPriority)
 
         # Classjob level stuff!
         _logger.info("Getting classjob list...")
@@ -646,9 +692,6 @@ class MainWindow(QMainWindow):
                 )
             )
             self.classjob_level_layout.addLayout(_classjob_level_layout)
-            self.xivapi_manager.set_classjob_id_level_max(
-                classjob_config.ID, classjob_config.level
-            )
             _classjob_level_layout.joblevel_value_changed.connect(
                 self.on_classjob_level_value_changed
             )
@@ -656,27 +699,16 @@ class MainWindow(QMainWindow):
                 classjob_config.ID, classjob_config.level
             )
 
-        # # https://realpython.com/python-pyqt-qthread/
-        # self.crafting_worker = CraftingWorker(
-        #     world_id=world_id,
-        #     classjob_config_dict=self.classjob_config,
-        # )
-        # self.crafting_worker_thread = QThread()
-        # self.crafting_worker.moveToThread(self.crafting_worker_thread)
-        # self.crafting_worker_thread.started.connect(self.crafting_worker.run)
-        # self.crafting_worker_thread.finished.connect(self.crafting_worker.deleteLater)
-        # self.crafting_worker.status_bar_update_signal.connect(
-        #     self.status_bar_label.setText
-        # )
-        # self.crafting_worker.recipe_table_update_signal.connect(
-        #     # self.table.on_recipe_table_update, Qt.BlockingQueuedConnection
-        #     self.table.on_recipe_table_update
-        # )
-        # self.classjob_level_changed.connect(self.crafting_worker.set_classjob_level)
-        # self.auto_refresh_listings_changed.connect(
-        #     self.crafting_worker.on_set_auto_refresh_listings
-        # )
-        # self.search_recipes.connect(self.crafting_worker.on_search_recipe)
+        self.universalis_manager = UniversalisManager(self.seller_id, world_id)
+        self.universalis_manager.moveToThread(self._xivapi_manager_thread)
+        self._xivapi_manager_thread.finished.connect(
+            self.universalis_manager.deleteLater
+        )
+        self.universalis_manager.status_bar_set_text_signal.connect(
+            self.status_bar_label.setText
+        )
+        self.request_listings.connect(self.universalis_manager.request_listings)
+        self._xivapi_manager_thread.start(QThread.LowPriority)
 
         self.retainerworker_thread = QThread()
         self.retainerworker = RetainerWorker(
@@ -771,6 +803,12 @@ class MainWindow(QMainWindow):
         # )
         # self.status_bar_label.setText(f"Done processing {item_name}...")
 
+    @Slot(Recipe)
+    def on_recipe_received(self, recipe: Recipe) -> None:
+        self.recipe_table_model.add_recipe(recipe)
+        _logger.debug(f"Recipe {recipe.ID} wants {recipe.ItemResult.ID} listings")
+        self.request_listings.emit(recipe.ItemResult.ID, world_id)
+
     def plot_listings(self, listings: Listings) -> None:
         self.price_graph.p1.clear()
         self.price_graph.p2.clear()
@@ -857,11 +895,23 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         print("exiting ui...")
-        self.crafting_worker_thread.setPriority(QThread.NormalPriority)
-        self.crafting_worker.stop()
-        self.crafting_worker_thread.quit()
-        self.crafting_worker_thread.wait()
-        print("crafting worker closed")
+        # self.crafting_worker_thread.setPriority(QThread.NormalPriority)
+        # self.crafting_worker.stop()
+        # self.crafting_worker_thread.quit()
+        # self.crafting_worker_thread.wait()
+        # print("crafting worker closed")
+
+        # self._xivapi_manager_thread.
+        # self.xivapi_manager.moveToThread(QThread.currentThread())
+        # self.close_signal.connect(
+        #     self.xivapi_manager.save_to_disk, Qt.BlockingQueuedConnection
+        # )
+        # self.close_signal.emit()
+        self._xivapi_manager_thread.quit()
+        self._xivapi_manager_thread.wait()
+        # self.xivapi_manager.moveToThread(QThread.currentThread())
+        self.xivapi_manager.save_to_disk()
+        print("xivapi saved")
 
         self.retainerworker_thread.quit()
         self.retainerworker_thread.wait()

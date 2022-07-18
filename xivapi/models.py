@@ -51,6 +51,7 @@ class Item(BaseModel):
     ID: int
     Name: str
     AetherialReduce: int
+    IsUntradable: bool
 
     class Config:
         frozen = True
@@ -115,6 +116,7 @@ class RecipeCollection(BaseCollectionModel[Recipe]):
 
 
 # Gathering Stuff
+
 
 class GatheringPointBaseLink(BaseModel):
     Item0: Optional[List[int]]
