@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 from scipy import stats
 from typing import Dict, List, Optional, Tuple
 import pandas as pd
@@ -70,7 +71,9 @@ from xivapi.xivapi import (
 )
 from xivapi.xivapi import save_to_disk as xivapi_save_to_disk
 
-logging.basicConfig(level=logging.INFO, format=' %(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO, format=" %(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -79,8 +82,11 @@ world_id = 55
 
 class MainWindow(QMainWindow):
     class RecipeListTable(QTableWidget):
-        def __init__(self, *args):
-            super().__init__(*args)
+        def __init__(
+            self, parent: QWidget, classjob_config: PersistMapping[int, ClassJobConfig]
+        ):
+            super().__init__(parent)
+            self.classjob_config = classjob_config
             self.setColumnCount(8)
             self.setHorizontalHeaderLabels(
                 ["Job", "Lvl", "Item", "Profit", "Velocity", "Lists", "Sp", "Score"]
@@ -113,6 +119,10 @@ class MainWindow(QMainWindow):
                 self.removeRow(self.table_data[key][0].row())
                 del self.table_data[key]
 
+        # https://stackoverflow.com/a/25679063/7552308
+        def gaussian(x, a, b, c, d=0):
+            return a * math.exp(-((x - b) ** 2) / (2 * c**2)) + d
+
         @Slot(Recipe, float, Listings)
         def on_recipe_table_update(
             self, recipe: Recipe, profit: float, velocity: float, listing_count: int
@@ -132,7 +142,9 @@ class MainWindow(QMainWindow):
                 row.append(QTableWidgetFloatItem(f"{profit:,.0f}"))
                 row.append(QTableWidgetFloatItem(f"{velocity:.2f}"))
                 row.append(QTableWidgetItem(str(listing_count)))
-                row.append(QTableWidgetFloatItem(f"{velocity / max(listing_count, 1):,.2f}"))
+                row.append(
+                    QTableWidgetFloatItem(f"{velocity / max(listing_count, 1):,.2f}")
+                )
                 row.append(QTableWidgetFloatItem(f"{profit * velocity:,.0f}"))
                 self.insertRow(self.rowCount())
                 self.setItem(self.rowCount() - 1, 0, row[0])
@@ -144,6 +156,55 @@ class MainWindow(QMainWindow):
                 self.setItem(self.rowCount() - 1, 6, row[6])
                 self.setItem(self.rowCount() - 1, 7, row[7])
                 self.table_data[recipe.ID] = row
+            # g = max(
+            #     recipe.RecipeLevelTable.ClassJobLevel
+            #     * 255
+            #     * 10
+            #     / self.classjob_config[recipe.ClassJob.ID].level
+            #     - (255 * 9),
+            #     0,
+            # )
+            # row[1].setBackground(
+            #     QBrush(QColor(255 - g, 255, 255 - g))
+            # )
+            row[1].setBackground(
+                QBrush(
+                    QColor.fromHsl(
+                        max(
+                            min(
+                                120
+                                - (
+                                    self.classjob_config[recipe.ClassJob.ID].level
+                                    - recipe.RecipeLevelTable.ClassJobLevel
+                                )
+                                * 24,
+                                120.0,
+                            ),
+                            0.0,
+                        ),
+                        127,
+                        157,
+                    )
+                )
+            )
+            row[3].setBackground(
+                QBrush(
+                    QColor.fromHsl(
+                        max(min(profit / (150000 / 120), 120.0), 0.0),
+                        127,
+                        157,
+                    )
+                )
+            )
+            row[6].setBackground(
+                QBrush(
+                    QColor.fromHsl(
+                        max(min(velocity * 40 / max(listing_count, 1), 120.0), 0.0),
+                        127,
+                        157,
+                    )
+                )
+            )
             self.sortItems(7, Qt.DescendingOrder)
 
     class RetainerTable(QTableWidget):
@@ -375,8 +436,8 @@ class MainWindow(QMainWindow):
             super().__init__()
             self.label = QLabel(parent)
             self.label.setText(classjob_config.Abbreviation)
-            self.label.setAlignment(Qt.AlignRight)
-            self.label.setAlignment(Qt.AlignCenter)
+            self.label.setAlignment(Qt.AlignRight)  # type: ignore
+            self.label.setAlignment(Qt.AlignCenter)  # type: ignore
             self.addWidget(self.label)
             self.spinbox = QSpinBox(parent)
             self.spinbox.setMaximum(90)
@@ -424,6 +485,28 @@ class MainWindow(QMainWindow):
         self.table_search_layout.setContentsMargins(0, 0, 0, 0)
         self.table_search_widget = QWidget()
 
+        # Classjob level stuff!
+        _logger.info("Getting classjob list...")
+        classjob_list: List[ClassJob] = get_classjob_doh_list()
+        self.classjob_config = PersistMapping[int, ClassJobConfig](
+            "classjob_config.bin",
+            {
+                classjob.ID: ClassJobConfig(**classjob.dict(), level=0)
+                for classjob in classjob_list
+            },
+        )
+        self.classjob_level_layout_list = []
+        for classjob_config in self.classjob_config.values():
+            self.classjob_level_layout_list.append(
+                _classjob_level_layout := MainWindow.ClassJobLevelLayout(
+                    self, classjob_config
+                )
+            )
+            self.classjob_level_layout.addLayout(_classjob_level_layout)
+            _classjob_level_layout.joblevel_value_changed.connect(
+                self.on_classjob_level_value_changed
+            )
+
         self.search_layout = QHBoxLayout()
         # self.analyze_button = QPushButton(self)
         # self.analyze_button.setText("Analyze")
@@ -441,7 +524,7 @@ class MainWindow(QMainWindow):
         self.search_layout.addWidget(self.search_refresh_button)
         self.table_search_layout.addLayout(self.search_layout)
 
-        self.table = MainWindow.RecipeListTable(self)
+        self.table = MainWindow.RecipeListTable(self, self.classjob_config)
         self.table.cellDoubleClicked.connect(self.on_table_double_clicked)
         self.table.cellClicked.connect(self.on_table_clicked)
         self.table_search_layout.addWidget(self.table)
@@ -474,28 +557,6 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.status_bar_label, 1)
 
         self.setMinimumSize(QSize(1000, 600))
-
-        # Classjob level stuff!
-        _logger.info("Getting classjob list...")
-        classjob_list: List[ClassJob] = get_classjob_doh_list()
-        self.classjob_config = PersistMapping[int, ClassJobConfig](
-            "classjob_config.bin",
-            {
-                classjob.ID: ClassJobConfig(**classjob.dict(), level=0)
-                for classjob in classjob_list
-            },
-        )
-        self.classjob_level_layout_list = []
-        for classjob_config in self.classjob_config.values():
-            self.classjob_level_layout_list.append(
-                _classjob_level_layout := MainWindow.ClassJobLevelLayout(
-                    self, classjob_config
-                )
-            )
-            self.classjob_level_layout.addLayout(_classjob_level_layout)
-            _classjob_level_layout.joblevel_value_changed.connect(
-                self.on_classjob_level_value_changed
-            )
 
         # https://realpython.com/python-pyqt-qthread/
         self.crafting_worker = CraftingWorker(
@@ -600,12 +661,12 @@ class MainWindow(QMainWindow):
         self.status_bar_label.setText(f"Processing {item_name}...")
         QCoreApplication.processEvents()
         recipe = get_recipe_by_id(recipe_id)
-        self.recipe_textedit.setText(
-            print_recipe(recipe, world_id)
-        )
+        self.recipe_textedit.setText(print_recipe(recipe, world_id))
         profit = get_profit(recipe, world_id)
         listings = get_listings(recipe.ItemResult.ID, world_id)
-        self.table.on_recipe_table_update(recipe, profit, listings.regularSaleVelocity, len(listings.listings))
+        self.table.on_recipe_table_update(
+            recipe, profit, listings.regularSaleVelocity, len(listings.listings)
+        )
         self.status_bar_label.setText(f"Done processing {item_name}...")
 
     def plot_listings(self, listings: Listings) -> None:
