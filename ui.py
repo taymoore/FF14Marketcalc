@@ -1,9 +1,12 @@
-from collections import namedtuple
+from collections import defaultdict, namedtuple
+from dataclasses import dataclass
+from enum import Enum
+import enum
 import json
 import logging
 from pathlib import Path
 from scipy import stats
-from typing import Any, Dict, List, NamedTuple, Optional, Tuple, Union
+from typing import Any, DefaultDict, Dict, List, MutableMapping, NamedTuple, Optional, Set, Tuple, Union
 import pandas as pd
 import numpy as np
 import pyperclip
@@ -57,7 +60,7 @@ from pyqtgraph import (
 from QTableWidgetFloatItem import QTableWidgetFloatItem
 from cache import PersistMapping
 from classjobConfig import ClassJobConfig
-from ff14marketcalc import get_profit, print_recipe
+from ff14marketcalc import get_profit, get_revenue, print_recipe
 from gathererWorker.gathererWorker import GathererWindow
 from itemCleaner.itemCleaner import ItemCleanerForm
 from retainerWorker.models import ListingData
@@ -70,7 +73,7 @@ from universalis.universalis import (
     set_seller_id,
 )
 from universalis.universalis import save_to_disk as universalis_save_to_disk
-from xivapi.models import ClassJob, Recipe, RecipeCollection
+from xivapi.models import ClassJob, Item, Recipe, RecipeCollection
 from xivapi.xivapi import (
     XivapiManager,
     get_classjob_doh_list,
@@ -104,12 +107,20 @@ class MainWindow(QMainWindow):
     class RecipeTableView(QTableView):
         def __init__(self, parent: Optional[QWidget] = None) -> None:
             super().__init__(parent)
-            self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+            # self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
             self.verticalHeader().hide()
             self.setEditTriggers(QAbstractItemView.NoEditTriggers)
             self.setSelectionBehavior(QAbstractItemView.SelectRows)
             self.setSortingEnabled(True)
             self.sortByColumn(7, Qt.DescendingOrder)
+        
+        def add_recipe(self, recipe: Recipe) -> None:
+            self.model().add_recipe(recipe)
+            self.resizeColumnsToContents()
+
+        def set_profit(self, recipe_id: int, profit: float) -> None:
+            self.model().set_profit(recipe_id, profit)
+            self.resizeColumnsToContents()
 
     class RecipeTableProxyModel(QSortFilterProxyModel):
         def __init__(self, parent: Optional[QWidget] = None) -> None:
@@ -143,22 +154,60 @@ class MainWindow(QMainWindow):
             # return False
             return super().filterAcceptsRow(source_row, source_parent)
 
+        def add_recipe(self, recipe: Recipe) -> None:
+            self.sourceModel().add_recipe(recipe)
+
+        def set_profit(self, recipe_id: int, profit: float) -> None:
+            self.sourceModel().set_profit(recipe_id, profit)
+
     class RecipeTableModel(QAbstractTableModel):
-        class RowData(NamedTuple):
-            classjob_abbreviation: str
-            classjob_level: int
-            item_name: str
-            profit: Optional[float] = None
-            velocity: Optional[float] = None
-            listing_count: Optional[int] = None
-            speed: Optional[float] = None
-            score: Optional[float] = None
+        @dataclass
+        class RowData:
+            classjob_abbreviation: str  # Job
+            classjob_level: int  # Lvl
+            item_name: str  # Item
+            profit: Optional[float] = None  # Profit
+            velocity: Optional[float] = None  # Velocity
+            listing_count: Optional[int] = None  # Lists
+            speed: Optional[float] = None  # Sp
+            score: Optional[float] = None  # Score
             recipe_id: int = None
+            # revenue: Optional[float] = None
+            # market_cost: Optional[float] = None
+            # crafting_cost: Optional[float] = None
+
+            def __getitem__(self, item: int) -> Any:
+                if item == 0:
+                    return self.classjob_abbreviation
+                elif item == 1:
+                    return self.classjob_level
+                elif item == 2:
+                    return self.item_name
+                elif item == 3:
+                    return self.profit
+                elif item == 4:
+                    return self.velocity
+                elif item == 5:
+                    return self.listing_count
+                elif item == 6:
+                    return self.speed
+                elif item == 7:
+                    return self.score
+                elif item == 8:
+                    return self.recipe_id
+                # elif item == 9:
+                #     return self.revenue
+                # elif item == 10:
+                #     return self.market_cost
+                # elif item == 11:
+                #     return self.crafting_cost
+                else:
+                    raise IndexError(f"Invalid index {item}")
 
         def __init__(self, parent: Optional[QObject] = None) -> None:
             super().__init__(parent)
             self.table_data: List[MainWindow.RecipeTableModel.RowData] = []
-            self.recipe_id_to_column_dict: Dict[int, int] = {}
+            self.recipe_id_to_row_index_dict: Dict[int, int] = {}
             self.header_data: List[str] = [
                 "Job",
                 "Lvl",
@@ -216,11 +265,10 @@ class MainWindow(QMainWindow):
                 return self.header_data[section]
             return None
 
-        # @Slot(Recipe)
         def add_recipe(self, recipe: Recipe) -> None:
             recipe_id = recipe.ID
             _logger.debug(f"recipe_table_model.add_recipe: {recipe_id}")
-            if recipe_id not in self.recipe_id_to_column_dict:
+            if recipe_id not in self.recipe_id_to_row_index_dict:
                 row_count = self.rowCount()
                 self.beginInsertRows(QModelIndex(), row_count, row_count)
                 row_data = self.RowData(
@@ -230,26 +278,62 @@ class MainWindow(QMainWindow):
                     recipe_id=recipe_id,
                 )
                 self.table_data.append(row_data)
-                self.recipe_id_to_column_dict[row_data.recipe_id] = row_count
+                self.recipe_id_to_row_index_dict[row_data.recipe_id] = row_count
                 self.endInsertRows()
-                # column = self.recipe_id_to_column_dict[recipe_id]
-                # row_data = self.table_data[column]
-                # row_data.classjob_abbreviation=recipe.ClassJob.Abbreviation
-                # row_data.classjob_level=recipe.RecipeLevelTable.ClassJobLevel
-                # row_data.item_name=recipe.ItemResult.Name
-                # # # self.dataChanged.emit(self.index(row, 0), self.index(row, 8))
 
-        @Slot(RowData)
-        def update_table(self, row_data: RowData) -> None:
-            if row_data.recipe_id in self.recipe_id_to_column_dict:
-                column = self.recipe_id_to_column_dict[row_data.recipe_id]
-                self.table_data[column] = row_data
+        def set_profit(self, recipe_id: int, profit: float) -> None:
+            row_index = self.recipe_id_to_row_index_dict[recipe_id]
+            # self.table_data[row_index].profit = profit
+            row_data = self.table_data[row_index]
+            row_data.profit = profit
+            if row_data.velocity is not None:
+                row_data.score = profit * row_data.velocity
+                self.dataChanged.emit(
+                    self.index(row_index, 3), self.index(row_index, 7)
+                )
             else:
-                row_count = self.rowCount()
-                self.beginInsertRows(QModelIndex(), row_count, row_count)
-                self.table_data.append(row_data)
-                self.recipe_id_to_column_dict[row_data.recipe_id] = row_count
-                self.endInsertRows()
+                self.dataChanged.emit(
+                    self.index(row_index, 3), self.index(row_index, 3)
+                )
+
+        # def update_recipe_revenue(self, recipe_id: int, revenue: float) -> None:
+        #     row_index = self.recipe_id_to_row_index_dict[recipe_id]
+        #     _logger.debug(f"recipe_table_model.update_recipe_revenue: {recipe_id}, revenue: {revenue}")
+        #     self.table_data[row_index].revenue = revenue
+        #     # self.table_data[row_index] = self.table_data[row_index]._replace(
+        #     #     revenue=revenue
+        #     # )
+        #     # self.dataChanged(
+        #     #     self.index(row_index, 3), self.index(row_index, 3)
+        #     # )
+
+        # def update_recipe_market_cost(self, recipe_id: int, market_cost: float) -> None:
+        #     row_index = self.recipe_id_to_row_index_dict[recipe_id]
+        #     _logger.debug(f"recipe_table_model.update_recipe_market_cost: {recipe_id}, market_cost: {market_cost}")
+        #     self.table_data[row_index].market_cost = market_cost
+
+        # @Slot(Listings)
+        # def add_listings(self, listings: Listings) -> None:
+        #     _logger.debug(f"recipe_table_model.add_listings: {listings.itemID}")
+        #     if listings.recipe_id in self.recipe_id_to_column_dict:
+        #         column = self.recipe_id_to_column_dict[listings.recipe_id]
+        #         row_data = self.table_data[column]
+        #         row_data.listing_count = listings.listing_count
+        #         row_data.profit = listings.profit
+        #         row_data.score = listings.score
+        #         self.dataChanged.emit(self.index(column, 0), self.index(column, 8))
+
+        # @Slot(RowData)
+        # def update_table(self, row_data: RowData) -> None:
+        #     if row_data.recipe_id in self.recipe_id_to_column_dict:
+        #         column = self.recipe_id_to_column_dict[row_data.recipe_id]
+        #         self.table_data[column] = row_data
+        #     else:
+        #         row_count = self.rowCount()
+        #         self.beginInsertRows(QModelIndex(), row_count, row_count)
+        #         self.table_data.append(row_data)
+        #         self.recipe_id_to_column_dict[row_data.recipe_id] = row_count
+        #         self.endInsertRows()
 
     # class RecipeListTable(QTableWidget):
     #     def __init__(self, *args):
@@ -566,12 +650,38 @@ class MainWindow(QMainWindow):
     classjob_level_changed = Signal(int, int)
     auto_refresh_listings_changed = Signal(bool)
     search_recipes = Signal(str)
-    request_listings = Signal(int, int)
+    request_listings = Signal(int, int, bool)
+    request_recipe = Signal(int, bool)
     # close_signal = Signal()
+
+    class ItemRecipeIndex(NamedTuple):
+        """
+        Position of an item in the recipe list.
+        """
+        recipe_id: int
+        index: Optional[int] # None is itemResult
+
+    class AquireAction(NamedTuple):
+        """
+        Action to aquire recipe result.
+        """
+        class AquireActionEnum(enum.Enum):
+            BUY = enum.auto()
+            CRAFT = enum.auto()
+            GATHER = enum.auto()
+        action: AquireActionEnum
+        cost: float
 
     def __init__(self):
         super().__init__()
 
+        self.item_id_to_recipe_index_dict: DefaultDict[int, Set[MainWindow.ItemRecipeIndex]] = defaultdict(set)
+        self.recipe_id_to_revenue_dict: Dict[int, float] = {}
+        self.recipe_id_to_market_cost_dict: Dict[int, float] = {}
+        self.recipe_id_to_crafting_cost_dict: Dict[int, float] = {}
+        self.recipe_id_to_aquire_action_dict: Dict[int, MainWindow.AquireAction] = {}
+
+        # Layout
         self.main_widget = QWidget()
 
         self.menu_bar = QMenuBar(self)
@@ -671,6 +781,7 @@ class MainWindow(QMainWindow):
             self.xivapi_manager.set_classjob_id_level_max_slot
         )
         # self.xivapi_manager.recipe_received.connect(self.recipe_table_model.add_recipe)
+        self.request_recipe.connect(self.xivapi_manager.request_recipe)
         self.xivapi_manager.recipe_received.connect(self.on_recipe_received)
         # self._xivapi_manager_thread.start(QThread.LowPriority)
 
@@ -708,6 +819,9 @@ class MainWindow(QMainWindow):
             self.status_bar_label.setText
         )
         self.request_listings.connect(self.universalis_manager.request_listings)
+        self.universalis_manager.listings_received_signal.connect(
+            self.on_listings_received
+        )
         self._xivapi_manager_thread.start(QThread.LowPriority)
 
         self.retainerworker_thread = QThread()
@@ -805,9 +919,88 @@ class MainWindow(QMainWindow):
 
     @Slot(Recipe)
     def on_recipe_received(self, recipe: Recipe) -> None:
-        self.recipe_table_model.add_recipe(recipe)
-        _logger.debug(f"Recipe {recipe.ID} wants {recipe.ItemResult.ID} listings")
-        self.request_listings.emit(recipe.ItemResult.ID, world_id)
+        _logger.debug(
+            f"Recipe {recipe.ID} wants listings for item {recipe.ItemResult.ID}"
+        )
+        self.request_listings.emit(recipe.ItemResult.ID, world_id, True)
+        recipe_id = recipe.ID
+        self.item_id_to_recipe_index_dict[recipe.ItemResult.ID].add(MainWindow.ItemRecipeIndex(recipe_id, None))
+        item: Item
+        ingredient_recipes: List[Recipe]
+        for ingredient_index in range(9):
+            if item := getattr(recipe, f"ItemIngredient{ingredient_index}"):
+                self.request_listings.emit(item.ID, world_id, True)
+                self.item_id_to_recipe_index_dict[item.ID].add(MainWindow.ItemRecipeIndex(recipe_id, ingredient_index))
+                if ingredient_recipes := getattr(
+                    recipe, f"ItemIngredientRecipe{ingredient_index}"
+                ):
+                    for ingredient_recipe in ingredient_recipes:
+                        self.request_recipe.emit(ingredient_recipe.ID, True)
+        self.recipe_table_view.add_recipe(recipe)
+
+    @Slot(Listings)
+    def on_listings_received(self, listings: Listings) -> None:
+        item_id = listings.itemID
+        _logger.debug(f"on_listings_received: {item_id}")
+        revenue = get_revenue(listings)
+        market_cost = listings.minPrice
+        recipe: Optional[Recipe]
+        for recipe_id, item_recipe_index in self.item_id_to_recipe_index_dict[item_id]:
+            # This might break if an item is its own ingredient.
+            # Should include all revenue before any crafting_cost calculation.
+            recipe = self.xivapi_manager.request_recipe(recipe_id)
+            assert recipe is not None
+            # if item is recipe result
+            if item_recipe_index is None:
+                self.recipe_id_to_revenue_dict[recipe_id] = revenue
+                self.recipe_id_to_market_cost_dict[recipe_id] = market_cost
+                self.process_aquire_action(recipe_id)
+            else:
+                self.process_crafting_cost(recipe)
+
+    def process_crafting_cost(self, recipe: Recipe) -> None:
+        ingredient_recipes: List[Recipe]
+        crafting_cost: Optional[float] = None
+        _logger.debug(f"process_crafting_cost: {recipe.ID}")
+        for ingredient_index in range(9):
+            if ingredient_recipes := getattr(
+                recipe, f"ItemIngredientRecipe{ingredient_index}"
+            ):
+                ingredient_cost = np.inf
+                for ingredient_recipe in ingredient_recipes:
+                    self.request_recipe.emit(ingredient_recipe.ID, True)
+                    if ingredient_recipe.ID in self.recipe_id_to_aquire_action_dict:
+                        ingredient_cost = min(ingredient_cost, self.recipe_id_to_aquire_action_dict[ingredient_recipe.ID].cost)
+                    else:
+                        _logger.debug(f"Cannot calculate crafting cost for {recipe.ID}: {ingredient_recipe.ID} not in recipe_id_to_aquire_action_dict")
+                        return
+                crafting_cost = ingredient_cost if crafting_cost is None else crafting_cost + ingredient_cost
+        _logger.debug(f"Crafting cost for {recipe.ID}: {crafting_cost}")
+        self.recipe_id_to_crafting_cost_dict[recipe.ID] = crafting_cost if crafting_cost is not None else np.inf
+        self.process_aquire_action(recipe.ID)
+
+
+    def process_aquire_action(self, recipe_id: int) -> None:
+        _logger.debug(f"process_aquire_action: {recipe_id}")
+        if (crafting_cost := self.recipe_id_to_crafting_cost_dict.get(recipe_id)) and (market_cost := self.recipe_id_to_market_cost_dict.get(recipe_id)):
+            if crafting_cost < market_cost:
+                self.recipe_id_to_aquire_action_dict[recipe_id] = MainWindow.AquireAction(
+                    MainWindow.AquireAction.AquireActionEnum.CRAFT,
+                    market_cost,
+                )
+            else:
+                self.recipe_id_to_aquire_action_dict[recipe_id] = MainWindow.AquireAction(
+                    MainWindow.AquireAction.AquireActionEnum.BUY,
+                    market_cost,
+                )
+            self.process_profit(recipe_id)
+
+
+    def process_profit(self, recipe_id: int) -> None:
+        _logger.debug(f"process_profit: {recipe_id}")
+        if (revenue := self.recipe_id_to_revenue_dict.get(recipe_id)) and (aquire_action := self.recipe_id_to_aquire_action_dict.get(recipe_id)):
+            profit = revenue - aquire_action.cost
+            self.recipe_table_view.set_profit(recipe_id, profit)
 
     def plot_listings(self, listings: Listings) -> None:
         self.price_graph.p1.clear()
@@ -912,6 +1105,9 @@ class MainWindow(QMainWindow):
         # self.xivapi_manager.moveToThread(QThread.currentThread())
         self.xivapi_manager.save_to_disk()
         print("xivapi saved")
+
+        self.universalis_manager.save_to_disk()
+        print("universalis saved")
 
         self.retainerworker_thread.quit()
         self.retainerworker_thread.wait()

@@ -300,18 +300,24 @@ class XivapiManager(QObject):
         self._classjob_recipe_page_dict = PersistMapping[int, Dict[int, int]](
             "recipe_page.bin", default=defaultdict(dict)
         )
-        self._classjob_id_level_max: Dict[int, int] = {}
+        # self._classjob_id_level_max: Dict[int, int] = {}     # TODO: Remove redundant dict not used anywhere
         self._classjob_id_level_current: Dict[int, int] = {}
 
-        self.recipes = PersistMapping[int, Recipe]("recipies.bin")
+        self._recipes = PersistMapping[int, Recipe]("recipies.bin")
+        self._recipes_mutex = QMutex()
         self.items = PersistMapping[int, Item]("items.bin")
+
+    @property
+    def recipies(self) -> PersistMapping[int, Recipe]:
+        with QMutexLocker(self._recipes_mutex):
+            return self._recipes
 
     @Slot(int, int)
     def set_classjob_id_level_max_slot(
         self, classjob_id: int, classjob_level_max: int
     ) -> None:
         _logger.debug(f"set_classjob_id_level_max: {classjob_id} {classjob_level_max}")
-        self._classjob_id_level_max[classjob_id] = classjob_level_max
+        # self._classjob_id_level_max[classjob_id] = classjob_level_max
         self._classjob_id_level_current[classjob_id] = classjob_level_max
         if (
             self._active_request is None
@@ -322,22 +328,24 @@ class XivapiManager(QObject):
         ):
             self._request_recipe_index()
 
-    def request_recipe(self, recipe_id: int, auto: bool = False) -> None:
-        if recipe_id in self.recipes:
-            try:
-                if (
-                    recipe_id not in self._emitted_recipe_id_set
-                    and not self.recipes[recipe_id].ItemResult.IsUntradable
-                ):
-                    self.recipe_received.emit(self.recipes[recipe_id])
-                    self._emitted_recipe_id_set.add(recipe_id)
-                return
-            except AttributeError as e:
-                _logger.error(f"Error getting recipe {recipe_id}")
-                _logger.error(
-                    f"ItemResult: {self.recipes[recipe_id].ItemResult.dict()}"
-                )
-                raise e
+    @Slot(int, bool)
+    def request_recipe(self, recipe_id: int, auto: bool = False) -> Optional[Recipe]:
+        with QMutexLocker(self._recipes_mutex):
+            if recipe_id in self._recipes:
+                try:
+                    if (
+                        recipe_id not in self._emitted_recipe_id_set
+                        and not self._recipes[recipe_id].ItemResult.IsUntradable
+                    ):
+                        self.recipe_received.emit(self._recipes[recipe_id])
+                        self._emitted_recipe_id_set.add(recipe_id)
+                    return self._recipes[recipe_id]
+                except AttributeError as e:
+                    _logger.error(f"Error getting recipe {recipe_id}")
+                    _logger.error(
+                        f"ItemResult: {self._recipes[recipe_id].ItemResult.dict()}"
+                    )
+                    raise e
         _logger.debug(f"request_recipe: {recipe_id}, auto: {auto}")
         url = QUrl(f"https://xivapi.com/Recipe/{recipe_id}")
         request = XivapiManager.RequestTuple(
@@ -347,6 +355,7 @@ class XivapiManager(QObject):
             url=url,
         )
         self._request_content(request)
+        return None
 
     def _request_recipe_index(
         self,
@@ -503,7 +512,8 @@ class XivapiManager(QObject):
             _logger.exception(e)
         else:
             _logger.debug(f"Received recipe {recipe.ID}")
-            self.recipes[recipe.ID] = recipe
+            with QMutexLocker(self._recipes_mutex):
+                self._recipes[recipe.ID] = recipe
             self._emitted_recipe_id_set.add(recipe.ID)
             if not recipe.ItemResult.IsUntradable:
                 self.recipe_received.emit(recipe)
@@ -552,5 +562,5 @@ class XivapiManager(QObject):
         print("xivapi_manager.save_to_disk()")
         self._classjob_recipe_page_dict.save_to_disk()
         self._classjob_recipe_id_dict.save_to_disk()
-        self.recipes.save_to_disk()
+        self._recipes.save_to_disk()
         self.items.save_to_disk()
