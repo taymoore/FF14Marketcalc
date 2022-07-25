@@ -51,7 +51,7 @@ from xivapi.models import (
 from cache import Persist, PersistMapping, get_size
 
 _logger = logging.getLogger(__name__)
-# _logger.setLevel(logging.DEBUG)
+_logger.setLevel(logging.DEBUG)
 
 GET_CONTENT_RATE = 0.05
 get_content_time = time.time() - GET_CONTENT_RATE
@@ -282,7 +282,7 @@ class XivapiManager(QObject):
     def __init__(self, world_id: int, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         self._world_id = world_id
-        self._get_content_rate = 10.05
+        self._get_content_rate = 0.05
         self._get_content_time = time.time() - self._get_content_rate
         self._network_access_manager = QNetworkAccessManager(self)
         self._network_access_manager.finished.connect(self._on_request_finished)  # type: ignore
@@ -363,6 +363,10 @@ class XivapiManager(QObject):
         classjob_level: Optional[int] = None,
         page: int = 1,
     ) -> None:
+        """
+        Requests a page of recipes.
+        set classjob_id and classjob_level to None to request highest level recipes that have not been downloaded yet.
+        """
         _logger.debug(f"_request_recipe_index: {classjob_id} {classjob_level} {page}")
         if classjob_id is None or classjob_level is None:
             assert classjob_id is None
@@ -377,6 +381,7 @@ class XivapiManager(QObject):
                 raise RuntimeError(
                     f"Already requesting recipe index. {self._request_queue}"
                 )
+            # Find highest classjob level page that hasn't been downloaded
             while classjob_id is None:
                 if all(
                     classjob_level <= 0
@@ -389,6 +394,7 @@ class XivapiManager(QObject):
                     key=lambda key: self._classjob_id_level_current[key],
                 )
                 classjob_level = self._classjob_id_level_current[classjob_id]
+                # If page is already downloaded
                 if (
                     self._classjob_recipe_page_dict[classjob_id].get(classjob_level)
                     == -1
@@ -396,6 +402,7 @@ class XivapiManager(QObject):
                     for recipe_id in self._classjob_recipe_id_dict[classjob_id][
                         classjob_level
                     ]:
+                        # Emit or download the recipe
                         self.request_recipe(recipe_id, auto=True)
                     self._classjob_id_level_current[classjob_id] -= 1
                     classjob_id = None
@@ -460,7 +467,7 @@ class XivapiManager(QObject):
         except Exception as e:
             _logger.exception(e)
 
-    # Data received from universalis
+    # Data received
     @Slot(QNetworkReply)
     def _on_request_finished(self, reply: QNetworkReply) -> None:
         xivapi_mutex.unlock()  # eventually remove this

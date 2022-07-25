@@ -43,7 +43,6 @@ class Listings(BaseModel):
     maxPrice: int
     maxPriceNQ: int
     maxPriceHQ: int
-    worldName: Optional[str]
 
     class Config:
         arbitrary_types_allowed = True

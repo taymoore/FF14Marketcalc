@@ -6,7 +6,18 @@ import json
 import logging
 from pathlib import Path
 from scipy import stats
-from typing import Any, DefaultDict, Dict, List, MutableMapping, NamedTuple, Optional, Set, Tuple, Union
+from typing import (
+    Any,
+    DefaultDict,
+    Dict,
+    List,
+    MutableMapping,
+    NamedTuple,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
 import pandas as pd
 import numpy as np
 import pyperclip
@@ -86,7 +97,10 @@ from xivapi.xivapi import save_to_disk as xivapi_save_to_disk
 logging.basicConfig(
     level=logging.INFO,
     format=" %(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[logging.FileHandler(".data/debug.log"), logging.StreamHandler()],
+    handlers=[
+        logging.FileHandler(".data/debug.log", mode="w"),
+        logging.StreamHandler(),
+    ],
 )
 
 _logger = logging.getLogger(__name__)
@@ -113,14 +127,32 @@ class MainWindow(QMainWindow):
             self.setSelectionBehavior(QAbstractItemView.SelectRows)
             self.setSortingEnabled(True)
             self.sortByColumn(7, Qt.DescendingOrder)
-        
+
         def add_recipe(self, recipe: Recipe) -> None:
             self.model().add_recipe(recipe)
             self.resizeColumnsToContents()
 
-        def set_profit(self, recipe_id: int, profit: float) -> None:
-            self.model().set_profit(recipe_id, profit)
+        def set_row_data(
+            self,
+            recipe_id: int,
+            profit: Optional[float] = None,
+            velocity: Optional[float] = None,
+            listing_count: Optional[int] = None,
+        ) -> None:
+            self.model().set_row_data(
+                recipe_id,
+                profit=profit,
+                velocity=velocity,
+                listing_count=listing_count,
+            )
             self.resizeColumnsToContents()
+
+        def classjob_level_changed(self) -> None:
+            self.dataChanged(
+                self.model().index(0, 1),
+                self.model().index(self.model().rowCount(), 1),
+                [Qt.BackgroundRole],
+            )
 
     class RecipeTableProxyModel(QSortFilterProxyModel):
         def __init__(self, parent: Optional[QWidget] = None) -> None:
@@ -157,8 +189,19 @@ class MainWindow(QMainWindow):
         def add_recipe(self, recipe: Recipe) -> None:
             self.sourceModel().add_recipe(recipe)
 
-        def set_profit(self, recipe_id: int, profit: float) -> None:
-            self.sourceModel().set_profit(recipe_id, profit)
+        def set_row_data(
+            self,
+            recipe_id: int,
+            profit: Optional[float] = None,
+            velocity: Optional[float] = None,
+            listing_count: Optional[int] = None,
+        ) -> None:
+            self.sourceModel().set_row_data(
+                recipe_id,
+                profit=profit,
+                velocity=velocity,
+                listing_count=listing_count,
+            )
 
     class RecipeTableModel(QAbstractTableModel):
         @dataclass
@@ -172,9 +215,7 @@ class MainWindow(QMainWindow):
             speed: Optional[float] = None  # Sp
             score: Optional[float] = None  # Score
             recipe_id: int = None
-            # revenue: Optional[float] = None
-            # market_cost: Optional[float] = None
-            # crafting_cost: Optional[float] = None
+            classjob_id: Optional[int] = None
 
             def __getitem__(self, item: int) -> Any:
                 if item == 0:
@@ -193,19 +234,16 @@ class MainWindow(QMainWindow):
                     return self.speed
                 elif item == 7:
                     return self.score
-                elif item == 8:
-                    return self.recipe_id
-                # elif item == 9:
-                #     return self.revenue
-                # elif item == 10:
-                #     return self.market_cost
-                # elif item == 11:
-                #     return self.crafting_cost
                 else:
                     raise IndexError(f"Invalid index {item}")
 
-        def __init__(self, parent: Optional[QObject] = None) -> None:
+        def __init__(
+            self,
+            parent: Optional[QObject],
+            classjob_config: PersistMapping[int, ClassJobConfig],
+        ) -> None:
             super().__init__(parent)
+            self.classjob_config = classjob_config
             self.table_data: List[MainWindow.RecipeTableModel.RowData] = []
             self.recipe_id_to_row_index_dict: Dict[int, int] = {}
             self.header_data: List[str] = [
@@ -253,6 +291,42 @@ class MainWindow(QMainWindow):
                     return cell_data
             elif role == Qt.UserRole:
                 return self.table_data[index.row()][index.column()]
+            elif role == Qt.BackgroundRole:
+                column = index.column()
+                row = index.row()
+                cell_data = self.table_data[row][column]
+                if cell_data is None:
+                    return ""
+                if column == 1:  # classjob_level
+                    classjob_id = self.table_data[row].classjob_id
+                    return QBrush(
+                        QColor.fromHsl(
+                            max(
+                                min(
+                                    120
+                                    - (
+                                        self.classjob_config[classjob_id].level
+                                        - cell_data
+                                    )
+                                    * 24,
+                                    120.0,
+                                ),
+                                0.0,
+                            ),
+                            127,
+                            157,
+                        )
+                    )
+                elif column == 3:  # profit
+                    return QBrush(
+                        QColor.fromHsl(
+                            max(min(cell_data / (150000 / 120), 120.0), 0.0), 127, 157
+                        )
+                    )
+                elif column == 6:  # speed
+                    return QBrush(
+                        QColor.fromHsl(max(min(cell_data * 40, 120.0), 0.0), 127, 157)
+                    )
             return None
 
         def headerData(  # type: ignore[override]
@@ -276,25 +350,32 @@ class MainWindow(QMainWindow):
                     classjob_level=recipe.RecipeLevelTable.ClassJobLevel,
                     item_name=recipe.ItemResult.Name,
                     recipe_id=recipe_id,
+                    classjob_id=recipe.ClassJob.ID,
                 )
                 self.table_data.append(row_data)
                 self.recipe_id_to_row_index_dict[row_data.recipe_id] = row_count
                 self.endInsertRows()
 
-        def set_profit(self, recipe_id: int, profit: float) -> None:
+        def set_row_data(
+            self,
+            recipe_id: int,
+            profit: Optional[float] = None,
+            velocity: Optional[float] = None,
+            listing_count: Optional[int] = None,
+        ) -> None:
             row_index = self.recipe_id_to_row_index_dict[recipe_id]
-            # self.table_data[row_index].profit = profit
             row_data = self.table_data[row_index]
-            row_data.profit = profit
-            if row_data.velocity is not None:
-                row_data.score = profit * row_data.velocity
-                self.dataChanged.emit(
-                    self.index(row_index, 3), self.index(row_index, 7)
-                )
-            else:
-                self.dataChanged.emit(
-                    self.index(row_index, 3), self.index(row_index, 3)
-                )
+            if profit is not None:
+                row_data.profit = profit
+            if velocity is not None:
+                row_data.velocity = velocity
+            if listing_count is not None:
+                row_data.listing_count = listing_count
+            if row_data.velocity is not None and row_data.profit is not None:
+                row_data.score = row_data.profit * row_data.velocity
+            if row_data.velocity is not None and row_data.listing_count is not None:
+                row_data.speed = row_data.velocity / max(row_data.listing_count, 1)
+            self.dataChanged.emit(self.index(row_index, 3), self.index(row_index, 7))
 
         # def update_recipe_revenue(self, recipe_id: int, revenue: float) -> None:
         #     row_index = self.recipe_id_to_row_index_dict[recipe_id]
@@ -654,32 +735,34 @@ class MainWindow(QMainWindow):
     request_recipe = Signal(int, bool)
     # close_signal = Signal()
 
-    class ItemRecipeIndex(NamedTuple):
-        """
-        Position of an item in the recipe list.
-        """
-        recipe_id: int
-        index: Optional[int] # None is itemResult
-
     class AquireAction(NamedTuple):
         """
         Action to aquire recipe result.
         """
+
         class AquireActionEnum(enum.Enum):
             BUY = enum.auto()
             CRAFT = enum.auto()
             GATHER = enum.auto()
+
         action: AquireActionEnum
-        cost: float
+        aquire_cost: float
 
     def __init__(self):
         super().__init__()
 
-        self.item_id_to_recipe_index_dict: DefaultDict[int, Set[MainWindow.ItemRecipeIndex]] = defaultdict(set)
-        self.recipe_id_to_revenue_dict: Dict[int, float] = {}
-        self.recipe_id_to_market_cost_dict: Dict[int, float] = {}
-        self.recipe_id_to_crafting_cost_dict: Dict[int, float] = {}
-        self.recipe_id_to_aquire_action_dict: Dict[int, MainWindow.AquireAction] = {}
+        self.item_id_to_recipe_id_result_dict: DefaultDict[int, Set[int]] = defaultdict(
+            set
+        )
+        self.item_id_to_recipe_id_ingredient_dict: DefaultDict[
+            int, Set[int]
+        ] = defaultdict(set)
+        self.item_id_to_revenue_dict: Dict[int, float] = {}
+        self.item_id_to_market_cost_dict: Dict[int, float] = {}
+        self.item_id_to_crafting_cost_dict: Dict[int, float] = {}
+        self.item_id_to_aquire_action_dict: Dict[int, MainWindow.AquireAction] = {}
+
+        self.gather_cost = 1000000
 
         # Layout
         self.main_widget = QWidget()
@@ -726,7 +809,45 @@ class MainWindow(QMainWindow):
         self.search_layout.addWidget(self.search_refresh_button)
         self.table_search_layout.addLayout(self.search_layout)
 
-        self.recipe_table_model = MainWindow.RecipeTableModel(self)
+        # Xivapi manager
+        self.xivapi_manager = XivapiManager(world_id)
+        self._xivapi_manager_thread = QThread()
+        self.xivapi_manager.moveToThread(self._xivapi_manager_thread)
+        self._xivapi_manager_thread.finished.connect(self.xivapi_manager.deleteLater)
+        self.classjob_level_changed.connect(
+            self.xivapi_manager.set_classjob_id_level_max_slot
+        )
+        self.request_recipe.connect(self.xivapi_manager.request_recipe)
+        self.xivapi_manager.recipe_received.connect(self.on_recipe_received)
+
+        # Classjob level stuff!
+        _logger.info("Getting classjob list...")
+        classjob_list: List[ClassJob] = get_classjob_doh_list()
+        self.classjob_config = PersistMapping[int, ClassJobConfig](
+            "classjob_config.bin",
+            {
+                classjob.ID: ClassJobConfig(**classjob.dict(), level=0)
+                for classjob in classjob_list
+            },
+        )
+        self.classjob_level_layout_list = []
+        for classjob_config in self.classjob_config.values():
+            self.classjob_level_layout_list.append(
+                _classjob_level_layout := MainWindow.ClassJobLevelLayout(
+                    self, classjob_config
+                )
+            )
+            self.classjob_level_layout.addLayout(_classjob_level_layout)
+            _classjob_level_layout.joblevel_value_changed.connect(
+                self.on_classjob_level_value_changed
+            )
+            _classjob_level_layout.joblevel_value_changed.emit(
+                classjob_config.ID, classjob_config.level
+            )
+
+        self.recipe_table_model = MainWindow.RecipeTableModel(
+            self, self.classjob_config
+        )
         self.recipe_table_proxy_model = MainWindow.RecipeTableProxyModel(self)
         self.recipe_table_proxy_model.setSourceModel(self.recipe_table_model)
         self.recipe_table_view = MainWindow.RecipeTableView(self)
@@ -735,11 +856,6 @@ class MainWindow(QMainWindow):
         self.recipe_table_view.doubleClicked.connect(self.on_table_double_clicked)
         self.recipe_table_view.clicked.connect(self.on_table_clicked)
         self.table_search_layout.addWidget(self.recipe_table_view)
-
-        # self.table = MainWindow.RecipeListTable(self)
-        # self.table.cellDoubleClicked.connect(self.on_table_double_clicked)
-        # self.table.cellClicked.connect(self.on_table_clicked)
-        # self.table_search_layout.addWidget(self.table)
 
         self.table_search_widget.setLayout(self.table_search_layout)
         self.left_splitter.addWidget(self.table_search_widget)
@@ -767,48 +883,11 @@ class MainWindow(QMainWindow):
 
         self.status_bar_label = QLabel()
         self.statusBar().addPermanentWidget(self.status_bar_label, 1)
-
-        self.setMinimumSize(QSize(1000, 600))
-
-        self.xivapi_manager = XivapiManager(world_id)
-        self._xivapi_manager_thread = QThread()
-        self.xivapi_manager.moveToThread(self._xivapi_manager_thread)
-        self._xivapi_manager_thread.finished.connect(self.xivapi_manager.deleteLater)
         self.xivapi_manager.status_bar_set_text_signal.connect(
             self.status_bar_label.setText
         )
-        self.classjob_level_changed.connect(
-            self.xivapi_manager.set_classjob_id_level_max_slot
-        )
-        # self.xivapi_manager.recipe_received.connect(self.recipe_table_model.add_recipe)
-        self.request_recipe.connect(self.xivapi_manager.request_recipe)
-        self.xivapi_manager.recipe_received.connect(self.on_recipe_received)
-        # self._xivapi_manager_thread.start(QThread.LowPriority)
 
-        # Classjob level stuff!
-        _logger.info("Getting classjob list...")
-        classjob_list: List[ClassJob] = get_classjob_doh_list()
-        self.classjob_config = PersistMapping[int, ClassJobConfig](
-            "classjob_config.bin",
-            {
-                classjob.ID: ClassJobConfig(**classjob.dict(), level=0)
-                for classjob in classjob_list
-            },
-        )
-        self.classjob_level_layout_list = []
-        for classjob_config in self.classjob_config.values():
-            self.classjob_level_layout_list.append(
-                _classjob_level_layout := MainWindow.ClassJobLevelLayout(
-                    self, classjob_config
-                )
-            )
-            self.classjob_level_layout.addLayout(_classjob_level_layout)
-            _classjob_level_layout.joblevel_value_changed.connect(
-                self.on_classjob_level_value_changed
-            )
-            _classjob_level_layout.joblevel_value_changed.emit(
-                classjob_config.ID, classjob_config.level
-            )
+        self.setMinimumSize(QSize(1000, 600))
 
         self.universalis_manager = UniversalisManager(self.seller_id, world_id)
         self.universalis_manager.moveToThread(self._xivapi_manager_thread)
@@ -852,12 +931,9 @@ class MainWindow(QMainWindow):
     ) -> None:
         _logger.debug(f"Classjob {classjob_id} level changed to {classjob_level}")
         self.classjob_config[classjob_id].level = classjob_level
-        # classjob_config = self.classjob_config[classjob_id]
-        # classjob_config.level = classjob_level
-        # self.classjob_config[classjob_id] = classjob_config
-        # self.table.remove_rows_above_level(classjob_id, classjob_level)
-        # print(f"Removed rows above level {classjob_level}")
         self.classjob_level_changed.emit(classjob_id, classjob_level)
+        if hasattr(self, "recipe_table_view"):
+            self.recipe_table_view.classjob_level_changed()
 
     @Slot()
     def on_item_cleaner_menu_clicked(self) -> None:
@@ -888,7 +964,13 @@ class MainWindow(QMainWindow):
                 return
 
     @Slot(int, int)
-    def on_table_clicked(self, row: int, column: int):
+    def on_table_clicked(self, table_view_index: QModelIndex):
+        # table_data_index = self.recipe_table_proxy_model.mapToSource(table_view_index)
+        # item_name = self.recipe_table_view.indexAt(table_view_index.row(), 2).data()
+        item_name = (
+            self.recipe_table_view.model().index(table_view_index.row(), 2).data()
+        )
+        _logger.debug(f"Table clicked: {item_name}")
         pass
         # for recipe_id, row_widget_list in self.table.table_data.items():
         #     if row_widget_list[0].row() == row:
@@ -919,18 +1001,16 @@ class MainWindow(QMainWindow):
 
     @Slot(Recipe)
     def on_recipe_received(self, recipe: Recipe) -> None:
-        _logger.debug(
-            f"Recipe {recipe.ID} wants listings for item {recipe.ItemResult.ID}"
-        )
+        _logger.debug(f"Recipe {recipe.ID} item result is {recipe.ItemResult.ID}")
         self.request_listings.emit(recipe.ItemResult.ID, world_id, True)
         recipe_id = recipe.ID
-        self.item_id_to_recipe_index_dict[recipe.ItemResult.ID].add(MainWindow.ItemRecipeIndex(recipe_id, None))
+        self.item_id_to_recipe_id_result_dict[recipe.ItemResult.ID].add(recipe_id)
         item: Item
         ingredient_recipes: List[Recipe]
         for ingredient_index in range(9):
             if item := getattr(recipe, f"ItemIngredient{ingredient_index}"):
                 self.request_listings.emit(item.ID, world_id, True)
-                self.item_id_to_recipe_index_dict[item.ID].add(MainWindow.ItemRecipeIndex(recipe_id, ingredient_index))
+                self.item_id_to_recipe_id_ingredient_dict[item.ID].add(recipe_id)
                 if ingredient_recipes := getattr(
                     recipe, f"ItemIngredientRecipe{ingredient_index}"
                 ):
@@ -942,65 +1022,110 @@ class MainWindow(QMainWindow):
     def on_listings_received(self, listings: Listings) -> None:
         item_id = listings.itemID
         _logger.debug(f"on_listings_received: {item_id}")
-        revenue = get_revenue(listings)
-        market_cost = listings.minPrice
+        self.item_id_to_revenue_dict[item_id] = get_revenue(listings)
+        listing_count = len(listings.listings)
+        if listing_count > 0:
+            self.item_id_to_market_cost_dict[item_id] = listings.minPrice
+        self.process_crafting_cost(item_id)
+        self.process_aquire_action(item_id)
         recipe: Optional[Recipe]
-        for recipe_id, item_recipe_index in self.item_id_to_recipe_index_dict[item_id]:
-            # This might break if an item is its own ingredient.
-            # Should include all revenue before any crafting_cost calculation.
+        # Items that are recipe result
+        for recipe_id in self.item_id_to_recipe_id_result_dict[item_id]:
+            self.recipe_table_view.set_row_data(
+                recipe_id,
+                velocity=listings.regularSaleVelocity,
+                listing_count=listing_count,
+            )
+        # Items that are ingredients
+        for recipe_id in self.item_id_to_recipe_id_ingredient_dict[item_id]:
             recipe = self.xivapi_manager.request_recipe(recipe_id)
             assert recipe is not None
-            # if item is recipe result
-            if item_recipe_index is None:
-                self.recipe_id_to_revenue_dict[recipe_id] = revenue
-                self.recipe_id_to_market_cost_dict[recipe_id] = market_cost
-                self.process_aquire_action(recipe_id)
-            else:
-                self.process_crafting_cost(recipe)
+            self.process_crafting_cost(recipe.ItemResult.ID)
 
-    def process_crafting_cost(self, recipe: Recipe) -> None:
-        ingredient_recipes: List[Recipe]
+    def process_crafting_cost(self, item_id: int) -> None:
+        ingredient_item: Item
         crafting_cost: Optional[float] = None
-        _logger.debug(f"process_crafting_cost: {recipe.ID}")
-        for ingredient_index in range(9):
-            if ingredient_recipes := getattr(
-                recipe, f"ItemIngredientRecipe{ingredient_index}"
-            ):
-                ingredient_cost = np.inf
-                for ingredient_recipe in ingredient_recipes:
-                    self.request_recipe.emit(ingredient_recipe.ID, True)
-                    if ingredient_recipe.ID in self.recipe_id_to_aquire_action_dict:
-                        ingredient_cost = min(ingredient_cost, self.recipe_id_to_aquire_action_dict[ingredient_recipe.ID].cost)
+        _logger.debug(f"process_crafting_cost: item_id: {item_id}")
+        for recipe_id in self.item_id_to_recipe_id_result_dict[item_id]:
+            recipe_cost: Optional[float] = None
+            _logger.debug(f"process_crafting_cost: recipe_id: {recipe_id}")
+            recipe = self.xivapi_manager.request_recipe(recipe_id)
+            for ingredient_index in range(9):
+                if ingredient_item := getattr(
+                    recipe, f"ItemIngredient{ingredient_index}"
+                ):
+                    if ingredient_item.ID in self.item_id_to_aquire_action_dict:
+                        ingredient_cost = self.item_id_to_aquire_action_dict[
+                            ingredient_item.ID
+                        ].aquire_cost
+                        recipe_cost = (
+                            ingredient_cost
+                            if recipe_cost is None
+                            else recipe_cost + ingredient_cost
+                        )
                     else:
-                        _logger.debug(f"Cannot calculate crafting cost for {recipe.ID}: {ingredient_recipe.ID} not in recipe_id_to_aquire_action_dict")
+                        _logger.debug(
+                            f"Cannot calculate crafting cost for {item_id}: {ingredient_item.ID} not in aquire_action_dict"
+                        )
                         return
-                crafting_cost = ingredient_cost if crafting_cost is None else crafting_cost + ingredient_cost
-        _logger.debug(f"Crafting cost for {recipe.ID}: {crafting_cost}")
-        self.recipe_id_to_crafting_cost_dict[recipe.ID] = crafting_cost if crafting_cost is not None else np.inf
-        self.process_aquire_action(recipe.ID)
+            crafting_cost = (
+                recipe_cost if crafting_cost is None else crafting_cost + recipe_cost
+            )
+        _logger.debug(f"Crafting cost for {item_id}: {crafting_cost}")
+        if crafting_cost is not None:
+            self.item_id_to_crafting_cost_dict[item_id] = crafting_cost
+        self.process_aquire_action(item_id)
 
-
-    def process_aquire_action(self, recipe_id: int) -> None:
-        _logger.debug(f"process_aquire_action: {recipe_id}")
-        if (crafting_cost := self.recipe_id_to_crafting_cost_dict.get(recipe_id)) and (market_cost := self.recipe_id_to_market_cost_dict.get(recipe_id)):
-            if crafting_cost < market_cost:
-                self.recipe_id_to_aquire_action_dict[recipe_id] = MainWindow.AquireAction(
-                    MainWindow.AquireAction.AquireActionEnum.CRAFT,
-                    market_cost,
+    def process_aquire_action(self, item_id: int) -> None:
+        _logger.debug(
+            f"process_aquire_action: {item_id}, crafting_cost: {self.item_id_to_crafting_cost_dict.get(item_id)}, market_cost: {self.item_id_to_market_cost_dict.get(item_id)}"
+        )
+        crafting_cost = self.item_id_to_crafting_cost_dict.get(item_id)
+        market_cost = self.item_id_to_market_cost_dict.get(item_id)
+        if market_cost is None:
+            if crafting_cost is None:
+                self.item_id_to_aquire_action_dict[item_id] = MainWindow.AquireAction(
+                    MainWindow.AquireAction.AquireActionEnum.GATHER, self.gather_cost
                 )
             else:
-                self.recipe_id_to_aquire_action_dict[recipe_id] = MainWindow.AquireAction(
-                    MainWindow.AquireAction.AquireActionEnum.BUY,
-                    market_cost,
+                self.item_id_to_aquire_action_dict[item_id] = MainWindow.AquireAction(
+                    MainWindow.AquireAction.AquireActionEnum.CRAFT, crafting_cost
                 )
-            self.process_profit(recipe_id)
+        else:
+            if crafting_cost is None:
+                self.item_id_to_aquire_action_dict[item_id] = MainWindow.AquireAction(
+                    MainWindow.AquireAction.AquireActionEnum.BUY, market_cost
+                )
+            else:
+                if crafting_cost < market_cost:
+                    self.item_id_to_aquire_action_dict[
+                        item_id
+                    ] = MainWindow.AquireAction(
+                        MainWindow.AquireAction.AquireActionEnum.CRAFT,
+                        market_cost,
+                    )
+                else:
+                    self.item_id_to_aquire_action_dict[
+                        item_id
+                    ] = MainWindow.AquireAction(
+                        MainWindow.AquireAction.AquireActionEnum.BUY,
+                        market_cost,
+                    )
+        for recipe_id in self.item_id_to_recipe_id_ingredient_dict[item_id]:
+            recipe: Recipe
+            recipe = self.xivapi_manager.request_recipe(recipe_id)
+            assert recipe is not None
+            self.process_crafting_cost(recipe.ItemResult.ID)
+        self.process_profit(item_id)
 
-
-    def process_profit(self, recipe_id: int) -> None:
-        _logger.debug(f"process_profit: {recipe_id}")
-        if (revenue := self.recipe_id_to_revenue_dict.get(recipe_id)) and (aquire_action := self.recipe_id_to_aquire_action_dict.get(recipe_id)):
-            profit = revenue - aquire_action.cost
-            self.recipe_table_view.set_profit(recipe_id, profit)
+    def process_profit(self, item_id: int) -> None:
+        _logger.debug(f"process_profit: {item_id}")
+        if (revenue := self.item_id_to_revenue_dict.get(item_id)) and (
+            aquire_action := self.item_id_to_aquire_action_dict.get(item_id)
+        ):
+            profit = revenue - aquire_action.aquire_cost
+            for recipe_id in self.item_id_to_recipe_id_result_dict[item_id]:
+                self.recipe_table_view.set_row_data(recipe_id, profit=profit)
 
     def plot_listings(self, listings: Listings) -> None:
         self.price_graph.p1.clear()
