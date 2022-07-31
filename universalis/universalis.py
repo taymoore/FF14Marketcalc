@@ -26,7 +26,7 @@ from universalis.models import Listings
 from xivapi.models import Item, Recipe
 
 _logger = logging.getLogger(__name__)
-_logger.setLevel(logging.DEBUG)
+# _logger.setLevel(logging.DEBUG)
 
 GET_CONTENT_RATE = 0.05
 get_content_time = time.time() - GET_CONTENT_RATE
@@ -34,7 +34,7 @@ get_content_time = time.time() - GET_CONTENT_RATE
 universalis_mutex = QMutex()
 
 CACHE_TIMEOUT_S = 3600 * 4
-CACHE_FILENAME = "listings.bin"
+CACHE_FILENAME = "listings-old.bin"
 
 PRINT_CACHE_SIZE = False
 
@@ -254,6 +254,7 @@ class UniversalisManager(QObject):
     def request_listings(
         self, item_id: int, world_id: int = None, auto: bool = False
     ) -> None:
+        _logger.debug(f"request_listings({item_id}, {world_id}, {auto})")
         with QMutexLocker(self._listings_mutex):
             if item_id in self.listings:
                 self.listings_received_signal.emit(self.listings[item_id])
@@ -356,5 +357,5 @@ class UniversalisManager(QObject):
             reply.deleteLater()
 
     def save_to_disk(self) -> None:
-        print("universalis_manager.save_to_disk()")
         self.listings.save_to_disk()
+        self._listings_updated_time.save_to_disk()
