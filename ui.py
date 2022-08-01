@@ -36,6 +36,7 @@ from PySide6.QtCore import (
     QModelIndex,
     QPersistentModelIndex,
     QAbstractTableModel,
+    QMutexLocker,
 )
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
@@ -133,6 +134,10 @@ class MainWindow(QMainWindow):
             self.model().add_recipe(recipe)
             self.resizeColumnsToContents()
 
+        @Slot(int, float)
+        def set_profit(self, recipe_id: int, profit: float) -> None:
+            self.set_row_data(recipe_id, profit=profit)
+
         def set_row_data(
             self,
             recipe_id: int,
@@ -140,6 +145,9 @@ class MainWindow(QMainWindow):
             velocity: Optional[float] = None,
             listing_count: Optional[int] = None,
         ) -> None:
+            _logger.debug(
+                f"Setting row data for {recipe_id}; {profit} {velocity} {listing_count}"
+            )
             self.model().set_row_data(
                 recipe_id,
                 profit=profit,
@@ -736,34 +744,10 @@ class MainWindow(QMainWindow):
     request_recipe = Signal(int, bool)
     # close_signal = Signal()
 
-    class AquireAction(NamedTuple):
-        """
-        Action to aquire recipe result.
-        """
-
-        class AquireActionEnum(enum.Enum):
-            BUY = enum.auto()
-            CRAFT = enum.auto()
-            GATHER = enum.auto()
-
-        action: AquireActionEnum
-        aquire_cost: float
-
     def __init__(self):
         super().__init__()
 
-        self.item_id_to_recipe_id_result_dict: DefaultDict[int, Set[int]] = defaultdict(
-            set
-        )
-        self.item_id_to_recipe_id_ingredient_dict: DefaultDict[
-            int, Set[int]
-        ] = defaultdict(set)
-        self.item_id_to_revenue_dict: Dict[int, float] = {}
-        self.item_id_to_market_cost_dict: Dict[int, float] = {}
-        self.item_id_to_crafting_cost_dict: Dict[int, float] = {}
-        self.item_id_to_aquire_action_dict: Dict[int, MainWindow.AquireAction] = {}
-
-        self.gather_cost = 1000000
+        # self.gather_cost = 1000000
 
         # Layout
         self.main_widget = QWidget()
@@ -912,6 +896,10 @@ class MainWindow(QMainWindow):
         # self.retainerworker_thread.started.connect(self.retainerworker.run)
         self.retainerworker_thread.finished.connect(self.retainerworker.deleteLater)
 
+        self.crafting_worker = CraftingWorker(
+            self.xivapi_manager, self.recipe_table_view.set_profit, self
+        )
+
         # self.crafting_worker.seller_listings_matched_signal.connect(
         #     self.retainerworker.on_retainer_listings_changed
         # )
@@ -1003,139 +991,129 @@ class MainWindow(QMainWindow):
     @Slot(Recipe)
     def on_recipe_received(self, recipe: Recipe) -> None:
         _logger.debug(f"Recipe {recipe.ID} item result is {recipe.ItemResult.ID}")
-        t = time.time()
+        # t = time.time()
         self.request_listings.emit(recipe.ItemResult.ID, world_id, True)
         recipe_id = recipe.ID
-        self.item_id_to_recipe_id_result_dict[recipe.ItemResult.ID].add(recipe_id)
+        self.crafting_worker.set_recipe_id_result(recipe.ItemResult.ID, recipe_id)
         item: Item
         ingredient_recipes: List[Recipe]
         for ingredient_index in range(9):
             if item := getattr(recipe, f"ItemIngredient{ingredient_index}"):
                 self.request_listings.emit(item.ID, world_id, True)
-                self.item_id_to_recipe_id_ingredient_dict[item.ID].add(recipe_id)
+                self.crafting_worker.set_recipe_id_ingredient(item.ID, recipe_id)
                 if ingredient_recipes := getattr(
                     recipe, f"ItemIngredientRecipe{ingredient_index}"
                 ):
                     for ingredient_recipe in ingredient_recipes:
                         self.request_recipe.emit(ingredient_recipe.ID, True)
         self.recipe_table_view.add_recipe(recipe)
-        log_time("on_recipe_received", t, _logger)
+        # log_time("on_recipe_received", t, _logger)
 
     @Slot(Listings)
     def on_listings_received(self, listings: Listings) -> None:
-        t1 = time.time()
+        # t1 = time.time()
         item_id = listings.itemID
         _logger.debug(f"on_listings_received: {item_id}")
-        self.item_id_to_revenue_dict[item_id] = get_revenue(listings)
+        self.crafting_worker.set_revenue(item_id, get_revenue(listings))
         listing_count = len(listings.listings)
         if listing_count > 0:
-            self.item_id_to_market_cost_dict[item_id] = listings.minPrice
-        self.process_crafting_cost(item_id)
+            self.crafting_worker.set_market_cost(item_id, listings.minPrice)
+        self.crafting_worker.queue_process_crafting_cost(item_id)
         recipe: Optional[Recipe]
-        for recipe_id in self.item_id_to_recipe_id_result_dict[item_id]:
+        for recipe_id in self.crafting_worker.get_recipe_id_result_list(item_id):
             self.recipe_table_view.set_row_data(
                 recipe_id,
                 velocity=listings.regularSaleVelocity,
                 listing_count=listing_count,
             )
-        t2 = log_time(
-            f"on_listings_received recipe result {len(self.item_id_to_recipe_id_result_dict[item_id])}",
-            t1,
-            _logger,
-        )
         # Items that are ingredients
-        for recipe_id in self.item_id_to_recipe_id_ingredient_dict[item_id]:
+        for recipe_id in self.crafting_worker.get_recipe_id_ingredient_list(item_id):
             recipe = self.xivapi_manager.request_recipe(recipe_id)
             assert recipe is not None
-            self.process_crafting_cost(recipe.ItemResult.ID)
-        log_time(
-            f"on_listings_received ingredient {len(self.item_id_to_recipe_id_ingredient_dict[item_id])}",
-            t2,
-            _logger,
-        )
-        log_time("on_listings_received", t1, _logger)
+            self.crafting_worker.queue_process_crafting_cost(recipe.ItemResult.ID)
+        # log_time("on_listings_received", t1, _logger)
 
-    def process_crafting_cost(self, item_id: int) -> None:
-        ingredient_item: Item
-        crafting_cost: Optional[float] = np.inf
-        _logger.debug(f"process_crafting_cost: item_id: {item_id}")
-        for recipe_id in self.item_id_to_recipe_id_result_dict[item_id]:
-            recipe_cost: Optional[float] = 0.0
-            _logger.debug(f"process_crafting_cost: recipe_id: {recipe_id}")
-            recipe = self.xivapi_manager.request_recipe(recipe_id)
-            for ingredient_index in range(9):
-                if ingredient_item := getattr(
-                    recipe, f"ItemIngredient{ingredient_index}"
-                ):
-                    if ingredient_item.ID in self.item_id_to_aquire_action_dict:
-                        ingredient_cost = self.item_id_to_aquire_action_dict[
-                            ingredient_item.ID
-                        ].aquire_cost
-                        recipe_cost += ingredient_cost
-                    else:
-                        _logger.debug(
-                            f"Cannot calculate crafting cost for {item_id}: {ingredient_item.ID} not in aquire_action_dict"
-                        )
-                        recipe_cost = None
-                        break
-            assert recipe_cost != 0.0
-            if recipe_cost is not None:
-                crafting_cost = min(crafting_cost, recipe_cost)
-        _logger.debug(f"Crafting cost for {item_id}: {crafting_cost}")
-        if crafting_cost is not None:
-            self.item_id_to_crafting_cost_dict[item_id] = crafting_cost
-        self.process_aquire_action(item_id)
+    # def process_crafting_cost(self, item_id: int) -> None:
+    #     ingredient_item: Item
+    #     crafting_cost: Optional[float] = np.inf
+    #     _logger.debug(f"process_crafting_cost: item_id: {item_id}")
+    #     for recipe_id in self.item_id_to_recipe_id_result_dict[item_id]:
+    #         recipe_cost: Optional[float] = 0.0
+    #         _logger.debug(f"process_crafting_cost: recipe_id: {recipe_id}")
+    #         recipe = self.xivapi_manager.request_recipe(recipe_id)
+    #         for ingredient_index in range(9):
+    #             if ingredient_item := getattr(
+    #                 recipe, f"ItemIngredient{ingredient_index}"
+    #             ):
+    #                 if ingredient_item.ID in self.item_id_to_aquire_action_dict:
+    #                     ingredient_cost = self.item_id_to_aquire_action_dict[
+    #                         ingredient_item.ID
+    #                     ].aquire_cost
+    #                     recipe_cost += ingredient_cost
+    #                 else:
+    #                     _logger.debug(
+    #                         f"Cannot calculate crafting cost for {item_id}: {ingredient_item.ID} not in aquire_action_dict"
+    #                     )
+    #                     recipe_cost = None
+    #                     break
+    #         assert recipe_cost != 0.0
+    #         if recipe_cost is not None:
+    #             crafting_cost = min(crafting_cost, recipe_cost)
+    #     _logger.debug(f"Crafting cost for {item_id}: {crafting_cost}")
+    #     if crafting_cost is not None:
+    #         self.item_id_to_crafting_cost_dict[item_id] = crafting_cost
+    #     self.process_aquire_action(item_id)
 
-    def process_aquire_action(self, item_id: int) -> None:
-        _logger.debug(
-            f"process_aquire_action: {item_id}, crafting_cost: {self.item_id_to_crafting_cost_dict.get(item_id)}, market_cost: {self.item_id_to_market_cost_dict.get(item_id)}"
-        )
-        crafting_cost = self.item_id_to_crafting_cost_dict.get(item_id)
-        market_cost = self.item_id_to_market_cost_dict.get(item_id)
-        if market_cost is None:
-            if crafting_cost is None:
-                self.item_id_to_aquire_action_dict[item_id] = MainWindow.AquireAction(
-                    MainWindow.AquireAction.AquireActionEnum.GATHER, self.gather_cost
-                )
-            else:
-                self.item_id_to_aquire_action_dict[item_id] = MainWindow.AquireAction(
-                    MainWindow.AquireAction.AquireActionEnum.CRAFT, crafting_cost
-                )
-        else:
-            if crafting_cost is None:
-                self.item_id_to_aquire_action_dict[item_id] = MainWindow.AquireAction(
-                    MainWindow.AquireAction.AquireActionEnum.BUY, market_cost
-                )
-            else:
-                if crafting_cost < market_cost:
-                    self.item_id_to_aquire_action_dict[
-                        item_id
-                    ] = MainWindow.AquireAction(
-                        MainWindow.AquireAction.AquireActionEnum.CRAFT,
-                        market_cost,
-                    )
-                else:
-                    self.item_id_to_aquire_action_dict[
-                        item_id
-                    ] = MainWindow.AquireAction(
-                        MainWindow.AquireAction.AquireActionEnum.BUY,
-                        market_cost,
-                    )
-        for recipe_id in self.item_id_to_recipe_id_ingredient_dict[item_id]:
-            recipe: Recipe
-            recipe = self.xivapi_manager.request_recipe(recipe_id)
-            assert recipe is not None
-            self.process_crafting_cost(recipe.ItemResult.ID)
-        self.process_profit(item_id)
+    # def process_aquire_action(self, item_id: int) -> None:
+    #     _logger.debug(
+    #         f"process_aquire_action: {item_id}, crafting_cost: {self.item_id_to_crafting_cost_dict.get(item_id)}, market_cost: {self.item_id_to_market_cost_dict.get(item_id)}"
+    #     )
+    #     crafting_cost = self.item_id_to_crafting_cost_dict.get(item_id)
+    #     market_cost = self.item_id_to_market_cost_dict.get(item_id)
+    #     if market_cost is None:
+    #         if crafting_cost is None:
+    #             self.item_id_to_aquire_action_dict[item_id] = MainWindow.AquireAction(
+    #                 MainWindow.AquireAction.AquireActionEnum.GATHER, self.gather_cost
+    #             )
+    #         else:
+    #             self.item_id_to_aquire_action_dict[item_id] = MainWindow.AquireAction(
+    #                 MainWindow.AquireAction.AquireActionEnum.CRAFT, crafting_cost
+    #             )
+    #     else:
+    #         if crafting_cost is None:
+    #             self.item_id_to_aquire_action_dict[item_id] = MainWindow.AquireAction(
+    #                 MainWindow.AquireAction.AquireActionEnum.BUY, market_cost
+    #             )
+    #         else:
+    #             if crafting_cost < market_cost:
+    #                 self.item_id_to_aquire_action_dict[
+    #                     item_id
+    #                 ] = MainWindow.AquireAction(
+    #                     MainWindow.AquireAction.AquireActionEnum.CRAFT,
+    #                     market_cost,
+    #                 )
+    #             else:
+    #                 self.item_id_to_aquire_action_dict[
+    #                     item_id
+    #                 ] = MainWindow.AquireAction(
+    #                     MainWindow.AquireAction.AquireActionEnum.BUY,
+    #                     market_cost,
+    #                 )
+    #     for recipe_id in self.item_id_to_recipe_id_ingredient_dict[item_id]:
+    #         recipe: Recipe
+    #         recipe = self.xivapi_manager.request_recipe(recipe_id)
+    #         assert recipe is not None
+    #         self.process_crafting_cost(recipe.ItemResult.ID)
+    #     self.process_profit(item_id)
 
-    def process_profit(self, item_id: int) -> None:
-        _logger.debug(f"process_profit: {item_id}")
-        if (revenue := self.item_id_to_revenue_dict.get(item_id)) and (
-            aquire_action := self.item_id_to_aquire_action_dict.get(item_id)
-        ):
-            profit = revenue - aquire_action.aquire_cost
-            for recipe_id in self.item_id_to_recipe_id_result_dict[item_id]:
-                self.recipe_table_view.set_row_data(recipe_id, profit=profit)
+    # def process_profit(self, item_id: int) -> None:
+    #     _logger.debug(f"process_profit: {item_id}")
+    #     if (revenue := self.item_id_to_revenue_dict.get(item_id)) and (
+    #         aquire_action := self.item_id_to_aquire_action_dict.get(item_id)
+    #     ):
+    #         profit = revenue - aquire_action.aquire_cost
+    #         for recipe_id in self.item_id_to_recipe_id_result_dict[item_id]:
+    #             self.recipe_table_view.set_row_data(recipe_id, profit=profit)
 
     def plot_listings(self, listings: Listings) -> None:
         self.price_graph.p1.clear()

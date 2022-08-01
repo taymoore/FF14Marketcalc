@@ -70,7 +70,6 @@ from garlandtools.models import Item as GarlandtoolsItem
 from itemCleaner.itemCleaner import ItemCleanerForm
 from retainerWorker.models import ListingData
 from universalis.models import Listings
-from craftingWorker import CraftingWorker
 from retainerWorker.retainerWorker import RetainerWorker
 from universalis.universalis import (
     get_listings,
