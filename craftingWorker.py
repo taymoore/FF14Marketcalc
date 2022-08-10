@@ -208,7 +208,7 @@ class CraftingWorker(QObject):
         self.profit_mutex = QMutex()
 
         self.threadpool = QThreadPool(self)
-        self.threadpool.setThreadPriority(QThread.LowestPriority)
+        self.threadpool.setThreadPriority(QThread.LowPriority)
         self.process_crafting_cost_queue: Deque[int] = deque()
         self.process_crafting_cost_queue_mutex = QMutex()
 
@@ -220,10 +220,10 @@ class CraftingWorker(QObject):
                 - self.threadpool.activeThreadCount()
                 >= 0
             ):
-                if len(self.process_crafting_cost_queue) > 1:
-                    _logger.info(
-                        f"Creating crafting worker thread. activeThreadCount: {self.threadpool.activeThreadCount()}; len(self.process_crafting_cost_queue): {len(self.process_crafting_cost_queue)}"
-                    )
+                # if len(self.process_crafting_cost_queue) > 1:
+                #     _logger.info(
+                #         f"Creating crafting worker thread. activeThreadCount: {self.threadpool.activeThreadCount()}; len(self.process_crafting_cost_queue): {len(self.process_crafting_cost_queue)}"
+                #     )
                 worker = CraftingWorker.CraftingWorkerThread(self)
                 # _logger.debug("connecting")
                 # worker.set_row_data_signal.connect(self.set_row_data_slot)

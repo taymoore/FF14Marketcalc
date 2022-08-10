@@ -61,6 +61,7 @@ from PySide6.QtWidgets import (
     QTreeWidget,
     QTreeWidgetItem,
     QSizePolicy,
+    QGridLayout,
 )
 from pyqtgraph import (
     PlotWidget,
@@ -167,6 +168,8 @@ class MainWindow(QMainWindow):
         def __init__(self, parent: Optional[QWidget] = None) -> None:
             super().__init__(parent)
             self.setDynamicSortFilter(True)
+            self.setFilterCaseSensitivity(Qt.CaseInsensitive)
+            self.setFilterKeyColumn(2)
 
         def lessThan(self, left, right):
             left_data = self.sourceModel().data(left, Qt.UserRole)
@@ -352,7 +355,7 @@ class MainWindow(QMainWindow):
 
         def add_recipe(self, recipe: Recipe) -> None:
             recipe_id = recipe.ID
-            _logger.debug(f"recipe_table_model.add_recipe: {recipe_id}")
+            # _logger.debug(f"recipe_table_model.add_recipe: {recipe_id}")
             if recipe_id not in self.recipe_id_to_row_index_dict:
                 row_count = self.rowCount()
                 self.beginInsertRows(QModelIndex(), row_count, row_count)
@@ -632,16 +635,6 @@ class MainWindow(QMainWindow):
             self.joblevel_value_changed.emit(self.classjob.ID, value)
 
     class RecipeDetails(QWidget):
-        class LabelLayout(QHBoxLayout):
-            def __init__(self, parent: QWidget, label: str) -> None:
-                super().__init__()
-                self.label = QLabel(parent)
-                self.label.setText(label)
-                self.addWidget(self.label)
-                self.value_label = QLabel(parent)
-                self.addWidget(self.value_label)
-                self.addStretch()
-
         def __init__(
             self, crafting_worker: CraftingWorker, parent: Optional[QWidget] = None
         ) -> None:
@@ -650,16 +643,32 @@ class MainWindow(QMainWindow):
             self.main_layout = QVBoxLayout()
             self.setLayout(self.main_layout)
 
-            self.profit_layout = MainWindow.RecipeDetails.LabelLayout(self, "Profit")
-            self.main_layout.addLayout(self.profit_layout)
+            self.top_layout = QGridLayout()
+            self.main_layout.addLayout(self.top_layout)
+            self.top_layout.setColumnStretch(2, 1)
 
-            self.revenue_layout = MainWindow.RecipeDetails.LabelLayout(self, "Revenue")
-            self.main_layout.addLayout(self.revenue_layout)
+            self.profit_label = QLabel()
+            self.top_layout.addWidget(self.profit_label, 0, 0, Qt.AlignRight)
+            self.profit_label.setText("Profit:")
 
-            self.cost_layout = MainWindow.RecipeDetails.LabelLayout(self, "Cost")
-            self.main_layout.addLayout(self.cost_layout)
+            self.profit_value_label = QLabel()
+            self.top_layout.addWidget(self.profit_value_label, 0, 1)
 
-            self.ingredients_table = QTreeWidget(self)
+            self.revenue_label = QLabel()
+            self.top_layout.addWidget(self.revenue_label, 1, 0, Qt.AlignRight)
+            self.revenue_label.setText("Revenue:")
+
+            self.revenue_value_label = QLabel()
+            self.top_layout.addWidget(self.revenue_value_label, 1, 1)
+
+            self.cost_label = QLabel()
+            self.top_layout.addWidget(self.cost_label, 2, 0, Qt.AlignRight)
+            self.cost_label.setText("Cost:")
+
+            self.cost_value_label = QLabel()
+            self.top_layout.addWidget(self.cost_value_label, 2, 1)
+
+            self.ingredients_table = QTreeWidget()
             self.ingredients_table.setColumnCount(6)
             self.ingredients_table.setHeaderLabels(
                 [
@@ -702,9 +711,14 @@ class MainWindow(QMainWindow):
                             ingredient.Name,
                             ingredient_action.name,
                             f"{ingredient_quantity}",
-                            f"{abs(ingredient_market_cost - ingredient_crafting_cost):,.1f}",
-                            f"{ingredient_crafting_cost:,.1f}",
-                            f"{ingredient_market_cost:,.1f}",
+                            f"{abs(ingredient_market_cost - ingredient_crafting_cost):,.0f}"
+                            if abs(ingredient_market_cost - ingredient_crafting_cost)
+                            != np.inf
+                            else "",
+                            f"{ingredient_crafting_cost:,.0f}"
+                            if ingredient_crafting_cost != np.inf
+                            else "",
+                            f"{ingredient_market_cost:,.0f}",
                         ],
                     )
                     parent_widget_item.addChild(ingredient_row_item)
@@ -722,17 +736,17 @@ class MainWindow(QMainWindow):
         def show_recipe(self, recipe: Recipe) -> None:
             item_id = recipe.ItemResult.ID
             profit = self.crafting_worker.get_profit(recipe.ID)
-            self.profit_layout.value_label.setText(f"{profit:,.0f}")
+            self.profit_value_label.setText(f"{profit:,.0f}")
             revenue = self.crafting_worker.get_revenue(item_id)
-            self.revenue_layout.value_label.setText(f"{revenue:,.2f}")
+            self.revenue_value_label.setText(f"{revenue:,.1f}")
             cost = self.crafting_worker.get_aquire_cost(item_id)
-            self.cost_layout.value_label.setText(f"{cost:,.2f}")
+            self.cost_value_label.setText(f"{cost:,.0f}")
             self.ingredients_table.clear()
             action = self.crafting_worker.get_aquire_action(item_id)
             crafting_cost = self.crafting_worker.get_crafting_cost(item_id)
             try:
                 market_cost_str = (
-                    f"{self.crafting_worker.get_market_cost(item_id):,.1f}"
+                    f"{self.crafting_worker.get_market_cost(item_id):,.0f}"
                 )
             except KeyError:
                 _logger.warning(
@@ -745,8 +759,8 @@ class MainWindow(QMainWindow):
                     recipe.ItemResult.Name,
                     action.name,
                     "",
-                    f"{profit:,.0f}",
-                    f"{crafting_cost:,.1f}",
+                    f"{profit:,.0f}" if profit != np.inf else "",
+                    f"{crafting_cost:,.0f}" if crafting_cost != np.inf else "",
                     market_cost_str,
                 ],
             )
@@ -756,7 +770,6 @@ class MainWindow(QMainWindow):
 
     retainer_listings_changed = Signal(Listings)
     classjob_level_changed = Signal(int, int)
-    auto_refresh_listings_changed = Signal(bool)
     search_recipes = Signal(str)
     request_listings = Signal(int, int, bool)
     request_recipe = Signal(int, bool)
@@ -799,17 +812,12 @@ class MainWindow(QMainWindow):
         # self.analyze_button = QPushButton(self)
         # self.analyze_button.setText("Analyze")
         # self.search_layout.addWidget(self.analyze_button)
-        # self.analyze_button.clicked.connect(self.on_table_double_clicked)
         self.search_label = QLabel(self)
         self.search_label.setText("Search:")
         self.search_layout.addWidget(self.search_label)
         self.search_lineedit = QLineEdit(self)
-        self.search_lineedit.returnPressed.connect(self.on_search_return_pressed)
+        # self.search_lineedit.returnPressed.connect(self.on_search_return_pressed)
         self.search_layout.addWidget(self.search_lineedit)
-        self.search_refresh_button = QPushButton(self)
-        self.search_refresh_button.setText("Refresh")
-        self.search_refresh_button.clicked.connect(self.on_refresh_button_clicked)
-        self.search_layout.addWidget(self.search_refresh_button)
         self.table_search_layout.addLayout(self.search_layout)
 
         # Xivapi manager
@@ -856,9 +864,11 @@ class MainWindow(QMainWindow):
         self.recipe_table_view = MainWindow.RecipeTableView(self)
         self.recipe_table_view.setModel(self.recipe_table_proxy_model)
         self.recipe_table_view.setSortingEnabled(True)
-        self.recipe_table_view.doubleClicked.connect(self.on_table_double_clicked)
         self.recipe_table_view.clicked.connect(self.on_table_clicked)
         self.table_search_layout.addWidget(self.recipe_table_view)
+        self.search_lineedit.textChanged.connect(
+            self.recipe_table_proxy_model.setFilterRegularExpression
+        )
 
         self.table_search_widget.setLayout(self.table_search_layout)
         self.left_splitter.addWidget(self.table_search_widget)
@@ -868,7 +878,7 @@ class MainWindow(QMainWindow):
         )
 
         self.recipe_details = MainWindow.RecipeDetails(self.crafting_worker, self)
-        self.left_splitter.addWidget(self.recipe_details)
+        self.right_splitter.addWidget(self.recipe_details)
 
         self.seller_id = (
             "4d9521317c92e33772cd74a166c72b0207ab9edc5eaaed5a1edb52983b70b2c2"
@@ -877,12 +887,19 @@ class MainWindow(QMainWindow):
 
         self.retainer_table = MainWindow.RetainerTable(self, self.seller_id)
         self.retainer_table.cellClicked.connect(self.on_retainer_table_clicked)
-        self.right_splitter.addWidget(self.retainer_table)
+        self.left_splitter.addWidget(self.retainer_table)
 
         self.price_graph = MainWindow.PriceGraph(self)
         # self.price_graph = MainWindow.PriceGraph()
         self.right_splitter.addWidget(self.price_graph)
+        self.left_splitter.setStretchFactor(0, 4)
+        self.left_splitter.setStretchFactor(1, 1)
         self.right_splitter.setSizes([1, 1])
+        self.right_splitter.setStretchFactor(0, 2)
+        self.right_splitter.setStretchFactor(1, 1)
+
+        self.centre_splitter.setStretchFactor(0, 5)
+        self.centre_splitter.setStretchFactor(1, 4)
 
         self.main_layout.addWidget(self.centre_splitter)
         self.main_widget.setLayout(self.main_layout)
@@ -908,7 +925,7 @@ class MainWindow(QMainWindow):
         self.universalis_manager.listings_received_signal.connect(
             self.on_listings_received
         )
-        self._xivapi_manager_thread.start(QThread.LowPriority)
+        self._xivapi_manager_thread.start(QThread.LowestPriority)
 
         self.retainerworker_thread = QThread()
         self.retainerworker = RetainerWorker(
@@ -955,12 +972,6 @@ class MainWindow(QMainWindow):
         form = GathererWindow(world_id, self)
         form.show()
 
-    @Slot()
-    def on_search_return_pressed(self):
-        pass
-        # self.table.clear_contents()
-        # self.search_recipes.emit(self.search_lineedit.text())
-
     @Slot(int, int)
     def on_retainer_table_clicked(self, row: int, column: int):
         for row_group_list in self.retainer_table.table_data.values():
@@ -982,28 +993,9 @@ class MainWindow(QMainWindow):
             self.plot_listings(self.universalis_manager[item_id])
         self.recipe_details.show_recipe(recipe)
 
-    @Slot(int, int)
-    def on_table_double_clicked(self, row: int, column: int):
-        pass
-        # for recipe_id, row_widget_list in self.table.table_data.items():
-        #     if row_widget_list[0].row() == row:
-        #         break
-        # item_name = row_widget_list[2].text()
-        # print(f"item name: {item_name}")
-        # self.status_bar_label.setText(f"Processing {item_name}...")
-        # QCoreApplication.processEvents()
-        # recipe = get_recipe_by_id(recipe_id)
-        # self.recipe_textedit.setText(print_recipe(recipe, world_id))
-        # profit = get_profit(recipe, world_id)
-        # listings = get_listings(recipe.ItemResult.ID, world_id)
-        # self.table.on_recipe_table_update(
-        #     recipe, profit, listings.regularSaleVelocity, len(listings.listings)
-        # )
-        # self.status_bar_label.setText(f"Done processing {item_name}...")
-
     @Slot(Recipe)
     def on_recipe_received(self, recipe: Recipe) -> None:
-        _logger.debug(f"Recipe {recipe.ID} item result is {recipe.ItemResult.ID}")
+        # _logger.debug(f"Recipe {recipe.ID} item result is {recipe.ItemResult.ID}")
         # t = time.time()
         self.request_listings.emit(recipe.ItemResult.ID, world_id, True)
         recipe_id = recipe.ID
@@ -1205,12 +1197,6 @@ class MainWindow(QMainWindow):
         )
         # p3.setLogMode(False, True)
         self.price_graph.auto_range()
-
-    @Slot()
-    def on_refresh_button_clicked(self):
-        self.search_lineedit.clear()
-        self.table.clear_contents()
-        self.auto_refresh_listings_changed.emit(True)
 
     def closeEvent(self, event):
         print("exiting ui...")
