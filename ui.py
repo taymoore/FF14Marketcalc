@@ -58,6 +58,9 @@ from PySide6.QtWidgets import (
     QMenuBar,
     QWidgetAction,
     QSpinBox,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QSizePolicy,
 )
 from pyqtgraph import (
     PlotWidget,
@@ -145,9 +148,6 @@ class MainWindow(QMainWindow):
             velocity: Optional[float] = None,
             listing_count: Optional[int] = None,
         ) -> None:
-            _logger.debug(
-                f"Setting row data for {recipe_id}; {profit} {velocity} {listing_count}"
-            )
             self.model().set_row_data(
                 recipe_id,
                 profit=profit,
@@ -243,6 +243,8 @@ class MainWindow(QMainWindow):
                     return self.speed
                 elif item == 7:
                     return self.score
+                elif item == 8:
+                    return self.recipe_id
                 else:
                     raise IndexError(f"Invalid index {item}")
 
@@ -385,113 +387,6 @@ class MainWindow(QMainWindow):
             if row_data.velocity is not None and row_data.listing_count is not None:
                 row_data.speed = row_data.velocity / max(row_data.listing_count, 1)
             self.dataChanged.emit(self.index(row_index, 3), self.index(row_index, 7))
-
-        # def update_recipe_revenue(self, recipe_id: int, revenue: float) -> None:
-        #     row_index = self.recipe_id_to_row_index_dict[recipe_id]
-        #     _logger.debug(f"recipe_table_model.update_recipe_revenue: {recipe_id}, revenue: {revenue}")
-        #     self.table_data[row_index].revenue = revenue
-        #     # self.table_data[row_index] = self.table_data[row_index]._replace(
-        #     #     revenue=revenue
-        #     # )
-        #     # self.dataChanged(
-        #     #     self.index(row_index, 3), self.index(row_index, 3)
-        #     # )
-
-        # def update_recipe_market_cost(self, recipe_id: int, market_cost: float) -> None:
-        #     row_index = self.recipe_id_to_row_index_dict[recipe_id]
-        #     _logger.debug(f"recipe_table_model.update_recipe_market_cost: {recipe_id}, market_cost: {market_cost}")
-        #     self.table_data[row_index].market_cost = market_cost
-
-        # @Slot(Listings)
-        # def add_listings(self, listings: Listings) -> None:
-        #     _logger.debug(f"recipe_table_model.add_listings: {listings.itemID}")
-        #     if listings.recipe_id in self.recipe_id_to_column_dict:
-        #         column = self.recipe_id_to_column_dict[listings.recipe_id]
-        #         row_data = self.table_data[column]
-        #         row_data.listing_count = listings.listing_count
-        #         row_data.profit = listings.profit
-        #         row_data.score = listings.score
-        #         self.dataChanged.emit(self.index(column, 0), self.index(column, 8))
-
-        # @Slot(RowData)
-        # def update_table(self, row_data: RowData) -> None:
-        #     if row_data.recipe_id in self.recipe_id_to_column_dict:
-        #         column = self.recipe_id_to_column_dict[row_data.recipe_id]
-        #         self.table_data[column] = row_data
-        #     else:
-        #         row_count = self.rowCount()
-        #         self.beginInsertRows(QModelIndex(), row_count, row_count)
-        #         self.table_data.append(row_data)
-        #         self.recipe_id_to_column_dict[row_data.recipe_id] = row_count
-        #         self.endInsertRows()
-
-    # class RecipeListTable(QTableWidget):
-    #     def __init__(self, *args):
-    #         super().__init__(*args)
-    #         self.setColumnCount(8)
-    #         self.setHorizontalHeaderLabels(
-    #             ["Job", "Lvl", "Item", "Profit", "Velocity", "Lists", "Sp", "Score"]
-    #         )
-    #         self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-    #         self.verticalHeader().hide()
-    #         self.setEditTriggers(QAbstractItemView.NoEditTriggers)
-
-    #         # recipe_id -> row
-    #         self.table_data: Dict[int, List[QTableWidgetItem]] = {}
-
-    #     def clear_contents(self) -> None:
-    #         self.clearContents()
-    #         self.setRowCount(0)
-    #         self.table_data.clear()
-
-    #     def remove_rows_above_level(
-    #         self, classjob_id: int, classjob_level: int
-    #     ) -> None:
-    #         keys_to_remove = []
-    #         for recipe_id in self.table_data.keys():
-    #             recipe = get_recipe_by_id(recipe_id)
-    #             if (
-    #                 recipe.ClassJob.ID == classjob_id
-    #                 and recipe.RecipeLevelTable.ClassJobLevel > classjob_level
-    #             ):
-    #                 keys_to_remove.append(recipe_id)
-    #         print(f"Removing {len(keys_to_remove)} rows")
-    #         for key in keys_to_remove:
-    #             self.removeRow(self.table_data[key][0].row())
-    #             del self.table_data[key]
-
-    #     @Slot(Recipe, float, Listings)
-    #     def on_recipe_table_update(
-    #         self, recipe: Recipe, profit: float, velocity: float, listing_count: int
-    #     ) -> None:
-    #         if recipe.ID in self.table_data:
-    #             row = self.table_data[recipe.ID]
-    #             row[3].setText(f"{profit:,.0f}")
-    #             row[4].setText(f"{velocity:.2f}")
-    #             row[5].setText(f"{listing_count}")
-    #             row[6].setText(f"{velocity / max(listing_count, 1):,.2f}")
-    #             row[7].setText(f"{profit * velocity:,.0f}")
-    #         else:
-    #             row: List[QTableWidgetItem] = []
-    #             row.append(QTableWidgetItem(recipe.ClassJob.Abbreviation))
-    #             row.append(QTableWidgetItem(str(recipe.RecipeLevelTable.ClassJobLevel)))
-    #             row.append(QTableWidgetItem(recipe.ItemResult.Name))
-    #             row.append(QTableWidgetFloatItem(f"{profit:,.0f}"))
-    #             row.append(QTableWidgetFloatItem(f"{velocity:.2f}"))
-    #             row.append(QTableWidgetItem(str(listing_count)))
-    #             row.append(QTableWidgetFloatItem(f"{velocity / max(listing_count, 1):,.2f}"))
-    #             row.append(QTableWidgetFloatItem(f"{profit * velocity:,.0f}"))
-    #             self.insertRow(self.rowCount())
-    #             self.setItem(self.rowCount() - 1, 0, row[0])
-    #             self.setItem(self.rowCount() - 1, 1, row[1])
-    #             self.setItem(self.rowCount() - 1, 2, row[2])
-    #             self.setItem(self.rowCount() - 1, 3, row[3])
-    #             self.setItem(self.rowCount() - 1, 4, row[4])
-    #             self.setItem(self.rowCount() - 1, 5, row[5])
-    #             self.setItem(self.rowCount() - 1, 6, row[6])
-    #             self.setItem(self.rowCount() - 1, 7, row[7])
-    #             self.table_data[recipe.ID] = row
-    #         self.sortItems(7, Qt.DescendingOrder)
 
     class RetainerTable(QTableWidget):
         def __init__(self, parent: QWidget, seller_id: int):
@@ -736,6 +631,129 @@ class MainWindow(QMainWindow):
             _logger.info(f"{self.classjob.Abbreviation} level changed to {value}")
             self.joblevel_value_changed.emit(self.classjob.ID, value)
 
+    class RecipeDetails(QWidget):
+        class LabelLayout(QHBoxLayout):
+            def __init__(self, parent: QWidget, label: str) -> None:
+                super().__init__()
+                self.label = QLabel(parent)
+                self.label.setText(label)
+                self.addWidget(self.label)
+                self.value_label = QLabel(parent)
+                self.addWidget(self.value_label)
+                self.addStretch()
+
+        def __init__(
+            self, crafting_worker: CraftingWorker, parent: Optional[QWidget] = None
+        ) -> None:
+            self.crafting_worker = crafting_worker
+            super().__init__(parent)
+            self.main_layout = QVBoxLayout()
+            self.setLayout(self.main_layout)
+
+            self.profit_layout = MainWindow.RecipeDetails.LabelLayout(self, "Profit")
+            self.main_layout.addLayout(self.profit_layout)
+
+            self.revenue_layout = MainWindow.RecipeDetails.LabelLayout(self, "Revenue")
+            self.main_layout.addLayout(self.revenue_layout)
+
+            self.cost_layout = MainWindow.RecipeDetails.LabelLayout(self, "Cost")
+            self.main_layout.addLayout(self.cost_layout)
+
+            self.ingredients_table = QTreeWidget(self)
+            self.ingredients_table.setColumnCount(6)
+            self.ingredients_table.setHeaderLabels(
+                [
+                    "Ingredient",
+                    "Action",
+                    "Quantity",
+                    "Profit",
+                    "Crafting Cost",
+                    "Market Cost",
+                ]
+            )
+            self.ingredients_table.setSelectionBehavior(QTreeWidget.SelectRows)
+            self.ingredients_table.header().setSectionResizeMode(
+                QHeaderView.ResizeToContents
+            )
+            self.main_layout.addWidget(self.ingredients_table)
+
+        def _add_recipe_to_table(
+            self, recipe: Recipe, parent_widget_item: QTreeWidgetItem
+        ):
+            for ingredient_index in range(9):
+                ingredient: Item = getattr(recipe, f"ItemIngredient{ingredient_index}")
+                if ingredient:
+                    ingredient_id = ingredient.ID
+                    ingredient_quantity: int = getattr(
+                        recipe, f"AmountIngredient{ingredient_index}"
+                    )
+                    ingredient_action = self.crafting_worker.get_aquire_action(
+                        ingredient_id
+                    )
+                    ingredient_crafting_cost = self.crafting_worker.get_crafting_cost(
+                        ingredient_id
+                    )
+                    ingredient_market_cost = self.crafting_worker.get_market_cost(
+                        ingredient_id
+                    )
+                    ingredient_row_item = QTreeWidgetItem(
+                        parent_widget_item,
+                        [
+                            ingredient.Name,
+                            ingredient_action.name,
+                            f"{ingredient_quantity}",
+                            f"{abs(ingredient_market_cost - ingredient_crafting_cost):,.1f}",
+                            f"{ingredient_crafting_cost:,.1f}",
+                            f"{ingredient_market_cost:,.1f}",
+                        ],
+                    )
+                    parent_widget_item.addChild(ingredient_row_item)
+                    if ingredient_action == CraftingWorker.AquireAction.CRAFT:
+                        ingredient_recipe_list: Optional[Tuple[Recipe]] = getattr(
+                            recipe, f"ItemIngredientRecipe{ingredient_index}"
+                        )
+                        assert ingredient_recipe_list is not None
+                        # Assume all recipes are created equal
+                        self._add_recipe_to_table(
+                            ingredient_recipe_list[0], ingredient_row_item
+                        )
+                        ingredient_row_item.setExpanded(True)
+
+        def show_recipe(self, recipe: Recipe) -> None:
+            item_id = recipe.ItemResult.ID
+            profit = self.crafting_worker.get_profit(recipe.ID)
+            self.profit_layout.value_label.setText(f"{profit:,.0f}")
+            revenue = self.crafting_worker.get_revenue(item_id)
+            self.revenue_layout.value_label.setText(f"{revenue:,.2f}")
+            cost = self.crafting_worker.get_aquire_cost(item_id)
+            self.cost_layout.value_label.setText(f"{cost:,.2f}")
+            self.ingredients_table.clear()
+            action = self.crafting_worker.get_aquire_action(item_id)
+            crafting_cost = self.crafting_worker.get_crafting_cost(item_id)
+            try:
+                market_cost_str = (
+                    f"{self.crafting_worker.get_market_cost(item_id):,.1f}"
+                )
+            except KeyError:
+                _logger.warning(
+                    f"No market cost for item {item_id} {recipe.ItemResult.Name}"
+                )
+                market_cost_str = ""
+            item_result_row_item = QTreeWidgetItem(
+                self.ingredients_table,
+                [
+                    recipe.ItemResult.Name,
+                    action.name,
+                    "",
+                    f"{profit:,.0f}",
+                    f"{crafting_cost:,.1f}",
+                    market_cost_str,
+                ],
+            )
+            self.ingredients_table.addTopLevelItem(item_result_row_item)
+            self._add_recipe_to_table(recipe, item_result_row_item)
+            item_result_row_item.setExpanded(True)
+
     retainer_listings_changed = Signal(Listings)
     classjob_level_changed = Signal(int, int)
     auto_refresh_listings_changed = Signal(bool)
@@ -845,8 +863,12 @@ class MainWindow(QMainWindow):
         self.table_search_widget.setLayout(self.table_search_layout)
         self.left_splitter.addWidget(self.table_search_widget)
 
-        self.recipe_textedit = QTextEdit(self)
-        self.left_splitter.addWidget(self.recipe_textedit)
+        self.crafting_worker = CraftingWorker(
+            self.xivapi_manager, self.recipe_table_view.set_profit, self
+        )
+
+        self.recipe_details = MainWindow.RecipeDetails(self.crafting_worker, self)
+        self.left_splitter.addWidget(self.recipe_details)
 
         self.seller_id = (
             "4d9521317c92e33772cd74a166c72b0207ab9edc5eaaed5a1edb52983b70b2c2"
@@ -895,10 +917,6 @@ class MainWindow(QMainWindow):
         self.retainerworker.moveToThread(self.retainerworker_thread)
         # self.retainerworker_thread.started.connect(self.retainerworker.run)
         self.retainerworker_thread.finished.connect(self.retainerworker.deleteLater)
-
-        self.crafting_worker = CraftingWorker(
-            self.xivapi_manager, self.recipe_table_view.set_profit, self
-        )
 
         # self.crafting_worker.seller_listings_matched_signal.connect(
         #     self.retainerworker.on_retainer_listings_changed
@@ -954,20 +972,15 @@ class MainWindow(QMainWindow):
 
     @Slot(int, int)
     def on_table_clicked(self, table_view_index: QModelIndex):
-        # table_data_index = self.recipe_table_proxy_model.mapToSource(table_view_index)
-        # item_name = self.recipe_table_view.indexAt(table_view_index.row(), 2).data()
-        item_name = (
-            self.recipe_table_view.model().index(table_view_index.row(), 2).data()
-        )
-        _logger.debug(f"Table clicked: {item_name}")
-        pass
-        # for recipe_id, row_widget_list in self.table.table_data.items():
-        #     if row_widget_list[0].row() == row:
-        #         break
-        # pyperclip.copy(row_widget_list[2].text())
-        # self.plot_listings(
-        #     get_listings(get_recipe_by_id(recipe_id).ItemResult.ID, world_id)
-        # )
+        item_name = table_view_index.siblingAtColumn(2).data()
+        pyperclip.copy(item_name)
+        table_data_index = self.recipe_table_proxy_model.mapToSource(table_view_index)
+        recipe_id = self.recipe_table_model.table_data[table_data_index.row()][8]
+        recipe: Recipe = self.xivapi_manager.request_recipe(recipe_id)
+        item_id = recipe.ItemResult.ID
+        if item_id in self.universalis_manager:
+            self.plot_listings(self.universalis_manager[item_id])
+        self.recipe_details.show_recipe(recipe)
 
     @Slot(int, int)
     def on_table_double_clicked(self, row: int, column: int):
@@ -1013,7 +1026,7 @@ class MainWindow(QMainWindow):
     def on_listings_received(self, listings: Listings) -> None:
         # t1 = time.time()
         item_id = listings.itemID
-        _logger.debug(f"on_listings_received: {item_id}")
+        # _logger.debug(f"on_listings_received: {item_id}")
         self.crafting_worker.set_revenue(item_id, get_revenue(listings))
         listing_count = len(listings.listings)
         if listing_count > 0:

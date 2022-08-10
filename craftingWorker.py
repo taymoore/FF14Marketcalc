@@ -39,7 +39,7 @@ from xivapi.xivapi import (
 )
 
 _logger = logging.getLogger(__name__)
-_logger.setLevel(logging.DEBUG)
+# _logger.setLevel(logging.DEBUG)
 
 
 class CraftingWorker(QObject):
@@ -220,9 +220,10 @@ class CraftingWorker(QObject):
                 - self.threadpool.activeThreadCount()
                 >= 0
             ):
-                _logger.debug(
-                    f"Creating crafting worker thread. activeThreadCount: {self.threadpool.activeThreadCount()}; len(self.process_crafting_cost_queue): {len(self.process_crafting_cost_queue)}"
-                )
+                if len(self.process_crafting_cost_queue) > 1:
+                    _logger.info(
+                        f"Creating crafting worker thread. activeThreadCount: {self.threadpool.activeThreadCount()}; len(self.process_crafting_cost_queue): {len(self.process_crafting_cost_queue)}"
+                    )
                 worker = CraftingWorker.CraftingWorkerThread(self)
                 # _logger.debug("connecting")
                 # worker.set_row_data_signal.connect(self.set_row_data_slot)
@@ -276,6 +277,10 @@ class CraftingWorker(QObject):
     def set_aquire_cost(self, item_id: int, aquire_cost: float) -> None:
         with QMutexLocker(self.aquire_cost_mutex):
             self.aquire_cost_dict[item_id] = aquire_cost
+
+    def get_aquire_action(self, item_id: int) -> AquireAction:
+        with QMutexLocker(self.aquire_action_mutex):
+            return self.aquire_action_dict[item_id]
 
     def set_aquire_action(self, item_id: int, aquire_action: AquireAction) -> None:
         with QMutexLocker(self.aquire_action_mutex):

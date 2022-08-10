@@ -343,7 +343,19 @@ class UniversalisManager(QObject):
             _logger.exception(e)
         else:
             _logger.debug(f"Received listings: {listings.itemID}")
+            # TODO: Rename history to purchase_history
             with QMutexLocker(self._listings_mutex):
+                if listings.itemID in self.listings:
+                    cached_listings = self.listings[listings.itemID]
+                    listings.history = cached_listings.history
+                    listings.listing_history = cached_listings.listing_history
+                else:
+                    listings.history = pd.DataFrame(columns=["Price"])
+                    listings.listing_history = pd.DataFrame(columns=["Price"])
+                for recent_history_listing in listings.recentHistory:
+                    listings.history.loc[
+                        recent_history_listing.timestamp
+                    ] = recent_history_listing.pricePerUnit
                 self.listings[listings.itemID] = listings
             self._listings_updated_time[listings.itemID] = time.time()
             self.listings_received_signal.emit(listings)

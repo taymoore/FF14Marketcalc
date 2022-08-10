@@ -307,6 +307,7 @@ class XivapiManager(QObject):
         self._recipes_mutex = QMutex()
         self.items = PersistMapping[int, Item]("items.bin")
 
+    # TODO: Remove this
     @property
     def recipies(self) -> PersistMapping[int, Recipe]:
         with QMutexLocker(self._recipes_mutex):
