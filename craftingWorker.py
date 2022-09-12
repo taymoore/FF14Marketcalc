@@ -225,9 +225,6 @@ class CraftingWorker(QObject):
                 #         f"Creating crafting worker thread. activeThreadCount: {self.threadpool.activeThreadCount()}; len(self.process_crafting_cost_queue): {len(self.process_crafting_cost_queue)}"
                 #     )
                 worker = CraftingWorker.CraftingWorkerThread(self)
-                # _logger.debug("connecting")
-                # worker.set_row_data_signal.connect(self.set_row_data_slot)
-                # _logger.debug("connected")
                 self.threadpool.start(worker)
 
     def get_recipe_id_result_list(self, item_id: int) -> Set[int]:

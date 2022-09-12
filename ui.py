@@ -136,7 +136,8 @@ class MainWindow(QMainWindow):
 
         def add_recipe(self, recipe: Recipe) -> None:
             self.model().add_recipe(recipe)  # type: ignore
-            self.resizeColumnsToContents()
+            if self.model().rowCount() == 1:
+                self.resizeColumnsToContents()
 
         @Slot(int, float)
         def set_profit(self, recipe_id: int, profit: float) -> None:
@@ -155,7 +156,7 @@ class MainWindow(QMainWindow):
                 velocity=velocity,
                 listing_count=listing_count,
             )
-            self.resizeColumnsToContents()
+            # self.resizeColumnsToContents()
 
         def classjob_level_changed(self) -> None:
             self.dataChanged(
@@ -702,23 +703,28 @@ class MainWindow(QMainWindow):
                     ingredient_crafting_cost = self.crafting_worker.get_crafting_cost(
                         ingredient_id
                     )
-                    ingredient_market_cost = self.crafting_worker.get_market_cost(
-                        ingredient_id
-                    )
+                    try:
+                        ingredient_market_cost = self.crafting_worker.get_market_cost(
+                            ingredient_id
+                        )
+                    except KeyError:
+                        ingredient_market_cost = np.inf
                     ingredient_row_item = QTreeWidgetItem(
                         parent_widget_item,
                         [
                             ingredient.Name,
                             ingredient_action.name,
                             f"{ingredient_quantity}",
-                            f"{abs(ingredient_market_cost - ingredient_crafting_cost):,.0f}"
-                            if abs(ingredient_market_cost - ingredient_crafting_cost)
+                            f"{ingredient_crafting_cost - ingredient_market_cost:,.0f}"
+                            if ingredient_crafting_cost - ingredient_market_cost
                             != np.inf
                             else "",
                             f"{ingredient_crafting_cost:,.0f}"
                             if ingredient_crafting_cost != np.inf
                             else "",
-                            f"{ingredient_market_cost:,.0f}",
+                            f"{ingredient_market_cost:,.0f}"
+                            if ingredient_market_cost != np.inf
+                            else "",
                         ],
                     )
                     parent_widget_item.addChild(ingredient_row_item)
@@ -726,7 +732,13 @@ class MainWindow(QMainWindow):
                         ingredient_recipe_list: Optional[Tuple[Recipe]] = getattr(
                             recipe, f"ItemIngredientRecipe{ingredient_index}"
                         )
-                        assert ingredient_recipe_list is not None
+                        try:
+                            assert ingredient_recipe_list is not None
+                        except:
+                            _logger.error(
+                                f"{ingredient.Name} has no recipe for index {ingredient_index}, skipping"
+                            )
+                            continue
                         # Assume all recipes are created equal
                         self._add_recipe_to_table(
                             ingredient_recipe_list[0], ingredient_row_item
@@ -1033,6 +1045,7 @@ class MainWindow(QMainWindow):
             )
         # Items that are ingredients
         for recipe_id in self.crafting_worker.get_recipe_id_ingredient_list(item_id):
+            # TODO: Speed this up by referencing the itemResult instead of the recipe
             recipe = self.xivapi_manager.request_recipe(recipe_id)
             assert recipe is not None
             self.crafting_worker.queue_process_crafting_cost(recipe.ItemResult.ID)
