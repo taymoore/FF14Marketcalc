@@ -80,7 +80,7 @@ from classjobConfig import ClassJobConfig
 from ff14marketcalc import get_profit, get_revenue, log_time, print_recipe
 from gathererWorker.gathererWorker import GathererWindow
 from itemCleaner.itemCleaner import ItemCleanerForm
-from retainerWorker.models import ListingData
+from retainerWorker.retainerWorkerModels import ListingData
 from universalis.models import Listings
 from craftingWorker import CraftingWorker
 from retainerWorker.retainerWorker import RetainerWorker
@@ -135,7 +135,7 @@ class MainWindow(QMainWindow):
             self.sortByColumn(7, Qt.DescendingOrder)
 
         def add_recipe(self, recipe: Recipe) -> None:
-            self.model().add_recipe(recipe)
+            self.model().add_recipe(recipe)  # type: ignore
             self.resizeColumnsToContents()
 
         @Slot(int, float)
@@ -149,7 +149,7 @@ class MainWindow(QMainWindow):
             velocity: Optional[float] = None,
             listing_count: Optional[int] = None,
         ) -> None:
-            self.model().set_row_data(
+            self.model().set_row_data(  # type: ignore
                 recipe_id,
                 profit=profit,
                 velocity=velocity,

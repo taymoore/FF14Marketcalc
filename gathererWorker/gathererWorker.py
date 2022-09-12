@@ -68,7 +68,7 @@ from ff14marketcalc import get_profit, print_recipe
 from garlandtools.garlandtools import GarlandtoolsManager
 from garlandtools.models import Item as GarlandtoolsItem
 from itemCleaner.itemCleaner import ItemCleanerForm
-from retainerWorker.models import ListingData
+from retainerWorker.retainerWorkerModels import ListingData
 from universalis.models import Listings
 from retainerWorker.retainerWorker import RetainerWorker
 from universalis.universalis import (
@@ -957,7 +957,7 @@ class GathererWindow(QMainWindow):
         self.gatherer_worker = GathererWorker(
             world_id=world_id, classjob_config_dict=self.classjob_config_dict
         )
-        self.gatherer_worker_thread.started.connect(self.gatherer_worker.run)
+        self.gatherer_worker_thread.started.connect(self.gatherer_worker.run)  # type: ignore
         self.gatherer_worker.moveToThread(self.gatherer_worker_thread)
         self.gatherer_worker.status_bar_update_signal.connect(
             self.status_bar_label.setText

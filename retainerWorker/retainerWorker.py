@@ -18,7 +18,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import QTableWidgetItem
 from ff14marketcalc import get_profit
-from retainerWorker.models import ListingData
+from retainerWorker.retainerWorkerModels import ListingData
 from universalis.universalis import get_listings
 
 from xivapi.models import ClassJob, Recipe, RecipeCollection
