@@ -92,6 +92,11 @@ class CraftingWorker(QObject):
                             # )
                             recipe_cost = None
                             break
+                        quantity: Optional[int] = getattr(
+                            recipe, f"ItemQuantity{ingredient_index}"
+                        )
+                        assert quantity != None
+                        recipe_cost *= quantity
                 assert recipe_cost != 0.0
                 if recipe_cost is not None:
                     crafting_cost = min(crafting_cost, recipe_cost)
