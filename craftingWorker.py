@@ -83,22 +83,23 @@ class CraftingWorker(QObject):
                         recipe, f"ItemIngredient{ingredient_index}"
                     ):
                         try:
-                            recipe_cost += self.crafting_worker.get_aquire_cost(
+                            ingredient_cost = self.crafting_worker.get_aquire_cost(
                                 ingredient_item.ID
                             )
                         except KeyError:
                             # _logger.debug(
                             #     f"Cannot calculate crafting cost for {item_id}: {ingredient_item.ID} not in aquire_action_dict"
                             # )
-                            recipe_cost = None
+                            ingredient_cost = None
                             break
-                        quantity: Optional[int] = getattr(
-                            recipe, f"ItemQuantity{ingredient_index}"
-                        )
-                        assert quantity != None
-                        recipe_cost *= quantity
-                assert recipe_cost != 0.0
-                if recipe_cost is not None:
+                        else:
+                            quantity: Optional[int] = getattr(
+                                recipe, f"AmountIngredient{ingredient_index}"
+                            )
+                            assert quantity != None
+                            ingredient_cost *= quantity
+                            recipe_cost += ingredient_cost
+                if recipe_cost is not None and recipe_cost > 0.0:
                     crafting_cost = min(crafting_cost, recipe_cost)
             # _logger.debug(f"Crafting cost for {item_id}: {crafting_cost}")
             try:
