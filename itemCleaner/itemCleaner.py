@@ -29,7 +29,8 @@ class InventoryItemDescriptor(BaseModel):
 
 class ItemCleanerForm(QDialog):
     class ItemCleanerTable(QTableWidget):
-        def __init__(self, parent: QWidget):
+        def __init__(self, parent: QWidget, world_id: int):
+            self.world_id = world_id
             super().__init__(parent)
             self.setColumnCount(4)
             self.setHorizontalHeaderLabels(
@@ -53,7 +54,7 @@ class ItemCleanerForm(QDialog):
             row_widgets.append(QTableWidgetItem(name))
             # Sort numerically: https://stackoverflow.com/questions/25533140/sorting-qtablewidget-items-numerically
             row_widgets.append(QTableWidgetFloatItem(f"{crafting_value:.1f}"))
-            listings = get_listings(item_id, 55)
+            listings = get_listings(item_id, self.world_id)
             row_widgets.append(
                 QTableWidgetFloatItem(
                     f"{listings.minPrice - listings.history['Price'].mean():.1f}"
@@ -78,11 +79,11 @@ class ItemCleanerForm(QDialog):
             # self.sortItems(0, Qt.DescendingOrder)
             self.sortItems(1)
 
-    def __init__(self, parent, get_item_crafting_value_table: Callable):
+    def __init__(self, parent, get_item_crafting_value_table: Callable, world_id: int):
         self.get_item_crafting_value_table = get_item_crafting_value_table
         super(ItemCleanerForm, self).__init__(parent)
         self.search_lineedit = QLineEdit(self)
-        self.table = ItemCleanerForm.ItemCleanerTable(self)
+        self.table = ItemCleanerForm.ItemCleanerTable(self, world_id)
         layout = QVBoxLayout()
         layout.addWidget(self.search_lineedit)
         layout.addWidget(self.table)

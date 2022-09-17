@@ -57,10 +57,7 @@ from retainerWorker.models import ListingData
 from universalis.models import Listings
 from craftingWorker import CraftingWorker
 from retainerWorker.retainerWorker import RetainerWorker
-from universalis.universalis import (
-    get_listings,
-    set_seller_id,
-)
+from universalis.universalis import get_listings, set_seller_id, world_id
 from universalis.universalis import save_to_disk as universalis_save_to_disk
 from xivapi.models import ClassJob, Recipe, RecipeCollection
 from xivapi.xivapi import (
@@ -76,8 +73,6 @@ logging.basicConfig(
 )
 
 _logger = logging.getLogger(__name__)
-
-world_id = 55
 
 
 class MainWindow(QMainWindow):
@@ -133,7 +128,9 @@ class MainWindow(QMainWindow):
                 row[4].setText(f"{velocity:.2f}")
                 row[5].setText(f"{listing_count}")
                 row[6].setText(f"{velocity / max(listing_count, 1):,.2f}")
-                row[7].setText(f"{profit * velocity:,.0f}")
+                row[7].setText(
+                    f"{profit * ((velocity / max(listing_count, 1)) ** 2):,.0f}"
+                )
             else:
                 row: List[QTableWidgetItem] = []
                 row.append(QTableWidgetItem(recipe.ClassJob.Abbreviation))
@@ -145,7 +142,11 @@ class MainWindow(QMainWindow):
                 row.append(
                     QTableWidgetFloatItem(f"{velocity / max(listing_count, 1):,.2f}")
                 )
-                row.append(QTableWidgetFloatItem(f"{profit * velocity:,.0f}"))
+                row.append(
+                    QTableWidgetFloatItem(
+                        f"{profit * ((velocity / max(listing_count, 1)) ** 2):,.0f}"
+                    )
+                )
                 self.insertRow(self.rowCount())
                 self.setItem(self.rowCount() - 1, 0, row[0])
                 self.setItem(self.rowCount() - 1, 1, row[1])
@@ -489,7 +490,7 @@ class MainWindow(QMainWindow):
         _logger.info("Getting classjob list...")
         classjob_list: List[ClassJob] = get_classjob_doh_list()
         self.classjob_config = PersistMapping[int, ClassJobConfig](
-            "classjob_config.bin",
+            f"classjob_config-{world_id}.bin",
             {
                 classjob.ID: ClassJobConfig(**classjob.dict(), level=0)
                 for classjob in classjob_list
@@ -617,7 +618,9 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def on_item_cleaner_menu_clicked(self) -> None:
-        form = ItemCleanerForm(self, self.crafting_worker.get_item_crafting_value_table)
+        form = ItemCleanerForm(
+            self, self.crafting_worker.get_item_crafting_value_table, world_id
+        )
         # TODO: Connect this
         # self.crafting_worker.crafting_value_table_changed.connect(self.form.on_crafting_value_table_changed)
         form.show()

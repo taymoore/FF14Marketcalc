@@ -20,8 +20,11 @@ get_content_time = time.time() - GET_CONTENT_RATE
 
 universalis_mutex = QMutex()
 
+# world_id = 55
+world_id = 86
+
 CACHE_TIMEOUT_S = 3600 * 4
-CACHE_FILENAME = "listings.bin"
+CACHE_FILENAME = f"listings-{world_id}.bin"
 
 PRINT_CACHE_SIZE = False
 
@@ -54,6 +57,7 @@ except (IOError, ValueError):
 
 if PRINT_CACHE_SIZE:
     print(f"Size of listings cache: {len(cache)} {get_size(cache):,.0f} bytes")
+
 
 def save_to_disk() -> None:
     pickle.dump(cache, open(f".data/{CACHE_FILENAME}", "wb"))
