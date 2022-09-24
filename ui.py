@@ -387,7 +387,9 @@ class MainWindow(QMainWindow):
             if listing_count is not None:
                 row_data.listing_count = listing_count
             if row_data.velocity is not None and row_data.profit is not None:
-                row_data.score = row_data.profit * row_data.velocity
+                row_data.score = row_data.profit * (
+                    (row_data.velocity / max(row_data.listing_count, 1)) ** 2
+                )
             if row_data.velocity is not None and row_data.listing_count is not None:
                 row_data.speed = row_data.velocity / max(row_data.listing_count, 1)
             self.dataChanged.emit(self.index(row_index, 3), self.index(row_index, 7))
@@ -685,7 +687,13 @@ class MainWindow(QMainWindow):
             self.ingredients_table.header().setSectionResizeMode(
                 QHeaderView.ResizeToContents
             )
+            self.ingredients_table.itemClicked.connect(self.on_item_clicked)
             self.main_layout.addWidget(self.ingredients_table)
+
+        @Slot(QTreeWidgetItem, int)
+        def on_item_clicked(self, item: QTreeWidgetItem, column: int) -> None:
+            _logger.info(f"Item clicked: {item.text(0)}")
+            pyperclip.copy(item.text(0))
 
         def _add_recipe_to_table(
             self, recipe: Recipe, parent_widget_item: QTreeWidgetItem
@@ -750,7 +758,7 @@ class MainWindow(QMainWindow):
             profit = self.crafting_worker.get_profit(recipe.ID)
             self.profit_value_label.setText(f"{profit:,.0f}")
             revenue = self.crafting_worker.get_revenue(item_id)
-            self.revenue_value_label.setText(f"{revenue:,.1f}")
+            self.revenue_value_label.setText(f"{revenue:,.0f}")
             cost = self.crafting_worker.get_aquire_cost(item_id)
             self.cost_value_label.setText(f"{cost:,.0f}")
             self.ingredients_table.clear()
